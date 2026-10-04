@@ -195,7 +195,7 @@ export default function FieldTerminal() {
         {useCloud && <>
         <p className="text-gray-600 text-sm">Needs mobile data or Wi-Fi. Your records are safe on this phone until they have been sent.</p>
         <form className="space-y-4" onSubmit={async e => { e.preventDefault(); setBusy(true); setMsg('')
-          try { const r = await syncWithCloud(ctx.db, ctx.tenantId, cfg, pw); if (r.errors.length) setMsg(`Failed: ${r.errors.join('; ')}`); else { setMsg(`Sent ${r.pushed}, received ${r.pulled}${r.quarantined ? `; ${r.quarantined} refused by the cloud` : ''}.`); onDone() } }
+          try { const r = await syncWithCloud(ctx.db, ctx.tenantId, cfg, pw, { canWrite: p => can(ctx, p) }); if (r.errors.length) setMsg(`Failed: ${r.errors.join('; ')}`); else { setMsg(`Sent ${r.pushed}, received ${r.pulled}${r.quarantined ? `; ${r.quarantined} refused by the cloud` : ''}.`); onDone() } }
           catch (x) { setMsg(x instanceof Error ? x.message : String(x)) } finally { setBusy(false); setPw('') } }}>
           <Label text="Project URL"><Input value={cfg.url ?? ''} onChange={e => setCfg({ ...cfg, url: e.target.value })} className={big} required /></Label>
           <Label text="Publishable key"><Input value={cfg.key ?? ''} onChange={e => setCfg({ ...cfg, key: e.target.value })} className={big} required /></Label>

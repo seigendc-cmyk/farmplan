@@ -212,7 +212,19 @@ Design and reasoning: `docs/PHASE_D_DESIGN.md`. Decisions taken: fuel input line
 | Old data | Operations recorded before v14 keep their labour/machinery values and cost rows (season totals unchanged); they show "Machine (old entry)" and never count as machine hours. Old fuel logs are not drawn from stock retroactively. |
 | Cloud | `0015_fuel_and_links.sql`: five nullable columns with composite tenant FKs, and a trigger that a log's fuel draw matches its stock movement (same farm, product and litres, made by that log). RLS and permissions unchanged. **Apply after every device runs v14.** |
 
-Known limit (pre-existing, found while building this): over the **cloud relay**, a phone signed in with a field role (e.g. Field Recorder) cannot insert stock movements (`resources.inventory.manage`) or cost rows (`finance.cost.edit`) in the cloud, so those rows are quarantined on the phone. This already applied to operation inputs and labour pay; machine fuel now hits it too. Over the **Wi-Fi hub** it does not apply (the office PC syncs everything under its own account). Tests: `src/services/phaseD.test.ts`, `src/ui.phaseD.test.tsx`, the 0015 block in `tests/migration.test.mjs`.
+Fixed by cloud migration 0016 (next section). Before it: over the **cloud relay**, a phone signed in with a field role (e.g. Field Recorder) cannot insert stock movements (`resources.inventory.manage`) or cost rows (`finance.cost.edit`) in the cloud, so those rows are quarantined on the phone. This already applied to operation inputs and labour pay; machine fuel now hits it too. Over the **Wi-Fi hub** it does not apply (the office PC syncs everything under its own account). Tests: `src/services/phaseD.test.ts`, `src/ui.phaseD.test.tsx`, the 0015 block in `tests/migration.test.mjs`.
+
+## Field roles sync their derived cost, stock and activity rows (cloud 0016; app schema unchanged)
+Design and decisions: `docs/CLOUD_DERIVED_ROWS_DESIGN.md`. A security change that adds insert paths only.
+
+| Area | What you get |
+|---|---|
+| Cloud | `0016_derived_rows_insert_only.sql`. A cost row or stock **consumption** may be inserted by anyone holding the permission of the record it comes from (e.g. `resources.machinery.record` for a machine log's fuel), when its source type, category, product and quantity match a source row in the same tenant and farm. A permissive policy beside the existing one: no new select, update or delete rights; default role permissions unchanged, nothing back-filled. Rules follow permissions, not role names (a custom role with `quality.grading.record` may insert grading labour; a Farm Manager, who has no `finance.cost.edit`, now syncs labour costs too). |
+| Reversals | `cancel_derived(table, tenant, id, source_type, source_id)` (security definer, returns nothing) soft-deletes one derived cost/stock row only when its source record is already soft-deleted in the same tenant and farm, the row's source matches, and the caller is an active member with the originating permission. The phone calls it when it re-sends a deleted derived row. |
+| Stock guard | Sums stock whatever the caller may read (a mechanic without `resources.inventory.view` can draw fuel), refuses non-members and other tenants first, and says only "Insufficient stock", never a quantity. |
+| Phone | Cost and stock rows go as **plain inserts** when the role lacks `finance.cost.edit` / `resources.inventory.manage` (or after the cloud's first RLS refusal of an upsert); activity events always do. A duplicate id counts as sent only when `row_sent` confirms the id is a row of this tenant. An edit (not a deletion) of a derived row already in the cloud is quarantined with "a person with … must apply it". Push order: source records, then stock movements, then the rows that point at them (operation inputs, contract advances, machine/curing logs re-sent with their fuel link), then costs and events. Over the Wi-Fi hub nothing changes. |
+
+**Apply 0016 together with this app build.** Phones on an older build keep sending upserts, which stay refused (quarantined, as before) until they update; then **Retry** on Sync & backup resends them. Tests: the 0016 block in `tests/migration.test.mjs`; `src/services/sync.derived.test.ts` (an RLS-aware fake cloud).
 
 ## Phase 8 — Wi-Fi hub (no internet)
 
@@ -247,7 +259,7 @@ npm run tauri build  # installers
 Data is stored in a local SQLite database (sql.js, persisted to IndexedDB inside the Tauri webview; Phase 2 moves persistence to a native file).
 
 ## Supabase
-Apply `supabase/migrations/0001_foundation.sql`, `0002_claim_tenant.sql`, `0003_curing_chain.sql`, `0004_grading_marketing.sql`, `0005_contracts.sql`, then `0006_sharing.sql`, `0007_field_devices.sql`, `0008_budgets.sql`, `0009_machinery.sql`, `0010_allocation.sql`, `0011_buyers.sql`, `0012_activity_log.sql`, `0013_brain_chat_perms.sql`, `0014_reorder_level.sql`, `0015_fuel_and_links.sql` (SQL editor or `supabase db push`). Create a user (Auth), then in **Sync & backup** enter project URL, publishable key and credentials. The device claims its local tenant id via `claim_tenant`, pushes, then pulls.
+Apply `supabase/migrations/0001_foundation.sql`, `0002_claim_tenant.sql`, `0003_curing_chain.sql`, `0004_grading_marketing.sql`, `0005_contracts.sql`, then `0006_sharing.sql`, `0007_field_devices.sql`, `0008_budgets.sql`, `0009_machinery.sql`, `0010_allocation.sql`, `0011_buyers.sql`, `0012_activity_log.sql`, `0013_brain_chat_perms.sql`, `0014_reorder_level.sql`, `0015_fuel_and_links.sql`, `0016_derived_rows_insert_only.sql` (SQL editor or `supabase db push`). Create a user (Auth), then in **Sync & backup** enter project URL, publishable key and credentials. The device claims its local tenant id via `claim_tenant`, pushes, then pulls.
 
 ## Design rules
 - Everything is an event: purchases, applications, operations create linked ledger rows; costs are derived, never retyped.

@@ -3,7 +3,7 @@ import { Db, uuid } from '../db/database'
 import { hashPin, isInitialised } from './setup'
 import { need } from './context'
 import { setDeviceTag } from './device'
-import { supabaseCloud, syncNow, type CloudClient, type SyncReport } from './sync'
+import { supabaseCloud, syncNow, type CloudClient, type SyncOptions, type SyncReport } from './sync'
 
 const unwrap = <T>(r: { data: T | null; error: { message: string } | null }, what: string): T => { if (r.error) throw new Error(`${what}: ${r.error.message}`); return (r.data ?? ([] as unknown)) as T }
 
@@ -64,10 +64,10 @@ export async function setMemberActive(sb: SupabaseClient, tenantId: string, user
 
 /** One manual sync from a field device: signs in (password is never stored), pushes the outbox, pulls changes. */
 import { connectCloud, saveCloudConfig, type CloudConfig } from '../lib/cloud'
-export async function syncWithCloud(db: Db, tenantId: string, cfg: CloudConfig, password: string): Promise<SyncReport> {
+export async function syncWithCloud(db: Db, tenantId: string, cfg: CloudConfig, password: string, opts: SyncOptions = {}): Promise<SyncReport> {
   const sb = await connectCloud(cfg, password); saveCloudConfig({ url: cfg.url, key: cfg.key, email: cfg.email })
   const name = db.get<{ name: string }>(`SELECT name FROM tenants WHERE id=?`, [tenantId])!.name
-  const r = await syncNow(db, supabaseCloud(sb), tenantId, name)
+  const r = await syncNow(db, supabaseCloud(sb), tenantId, name, opts)
   try { await sb.auth.signOut() } catch { /* best effort */ }
   return r
 }

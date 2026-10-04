@@ -1,6 +1,6 @@
 # Design — field roles can sync the rows their work derives (cloud migration 0016)
 
-**Status: proposal, awaiting the owner's approval. No migration or code has been written.** Branch `cloud-rls-derived-rows`.
+**Status: approved and built** as `supabase/migrations/0016_derived_rows_insert_only.sql` with the app changes in `src/services/sync.ts` (branch `cloud-rls-derived-rows`). See "As built" at the end for the owner's decisions and where the build differs from this proposal.
 
 ## The gap, measured (PGlite, all migrations 0001–0015, a Field Recorder signed in)
 | What the phone sends | Today | Why |
@@ -110,3 +110,23 @@ create policy ins_derived on public.inventory_transactions for insert with check
 1. **Reversals.** Approve the known limit above (recommended for now), or add later a narrow `reverse_derived(table, id)` function? It would only soft-delete a derived row whose source is already soft-deleted, and only for a caller with the originating permission. That is a controlled update path, which this design otherwise avoids.
 2. **Stock guard as `security definer`:** approve it (recommended), or require `resources.inventory.view` for anyone who draws stock?
 3. **Manager-only sources** (curing load/offload labour, grading labour): include them as above (recommended, since the rule is the originating permission, not the role name), or limit 0016 to the Field Recorder's own sources?
+
+## As built (owner's decisions)
+1. **Reversals: built the narrow cancel function.** `cancel_derived(p_table, p_tenant, p_id, p_source_type, p_source_id)` is security definer and returns nothing. It soft-deletes one `cost_entries` row or one `inventory_transactions` consumption, and only when all of these hold:
+   * the caller is an active member with the originating permission (`derived_perm`);
+   * the row's `source_type` and `source_id` are the ones given;
+   * the source record is already soft-deleted in the same tenant and farm.
+
+   For a stock draw by an operation, the source counts as gone when the operation is deleted, or when the operation input line that made the draw is deleted. A second call on a row already cancelled does nothing.
+
+   Refusals name no amounts. The phone calls the function when it re-sends a deleted derived row that is already in the cloud. Section 3 of "App changes" above no longer applies to deletions.
+2. **Stock guard.** `tg_no_negative_stock` is security definer. It refuses non-members and other tenants ("Not a member of this farm") before it sums anything, and it raises only "Insufficient stock", never a balance. It grants nothing else.
+3. **Manager-only sources are included.** Rules follow permissions: PGlite tests a custom "Grader" role (grading labour) and the custom "Cycle Starter" role (loading labour).
+4. **Activity events** are always sent as plain inserts.
+5. **Added during the build: `row_sent(p_table, p_tenant, p_id) → boolean`.**
+   * Why it is needed: a duplicate plain insert is reported on the `id` primary key. That error does not say whether the existing row is this tenant's own row (tested in Postgres).
+   * What it does: answers "is this id a row of my tenant?" It is members only, covers the three insert-only tables, and returns no column of the row.
+   * How the phone uses it: it treats a duplicate as already sent only when `row_sent` is true. Otherwise the row is quarantined.
+   * An edit (not a deletion) of a derived row that is already in the cloud is quarantined with "a person with … must apply it".
+6. **No permission list on the phone is needed.** When the signed-in role's permissions are passed in, the phone goes straight to plain inserts. Otherwise the first RLS refusal (42501) of an upsert switches that table to plain inserts for the rest of the sync.
+7. **Re-sent logs stay pending.** Machine and curing logs whose stock movement is still in the outbox are sent once without `fuel_txn_id`. Their outbox entry stays pending until the second send, with the link, succeeds, so a dropped connection cannot lose the link.

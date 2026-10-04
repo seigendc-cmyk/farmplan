@@ -27,7 +27,7 @@ export default function SyncPage() {
       const { error } = await sb.auth.signInWithPassword({ email: cfg.email, password: pw })
       if (error) throw new Error(`Cloud sign-in failed: ${error.message}`)
       const name = ctx.db.get<{ name: string }>(`SELECT name FROM tenants WHERE id=?`, [ctx.tenantId])!.name
-      const r = await syncNow(ctx.db, supabaseCloud(sb), ctx.tenantId, name)
+      const r = await syncNow(ctx.db, supabaseCloud(sb), ctx.tenantId, name, { canWrite: p => can(ctx, p) })
       setReport(r.errors.length ? `Failed: ${r.errors.join('; ')}` : `Sent ${plural(r.pushed, 'record')}, received ${r.pulled}${r.conflictsKept ? `, kept ${r.conflictsKept} newer local edits` : ''}${r.quarantined ? `; ${r.quarantined} record(s) were refused by the cloud — see below` : ''}.`)
       if (!r.errors.length) push('ok', 'Sync complete')
       bump(); await sb.auth.signOut()

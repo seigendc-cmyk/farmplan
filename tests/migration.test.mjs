@@ -419,4 +419,145 @@ await assert.rejects(()=>db.query(`insert into machines(tenant_id,farm_id,name,f
 await assert.rejects(()=>db.query(`insert into labour_entries(tenant_id,farm_id,season_id,worked_on,worker_name,task,operation_id) values ('${tb}','${fb}','${seas}','2027-01-05','X','Y','${op15}')`))
 assert.equal((await db.query(`select * from machine_logs`)).rows.length,0)   // RLS unchanged: B sees none of A's logs
 await db.exec(`reset role`)
+
+// ---- 0016: derived cost / stock rows are insert-only for whoever holds the originating permission ----
+const grants16=(await db.query(`select count(*)::int n from role_permissions`)).rows[0].n
+await db.exec(readFileSync('supabase/migrations/0016_derived_rows_insert_only.sql','utf8'))
+assert.equal((await db.query(`select count(*)::int n from role_permissions`)).rows[0].n, grants16)   // default role permissions unchanged, nothing back-filled
+const id16=()=>crypto.randomUUID()
+const farm2=(await db.query(`insert into farms(tenant_id,name) values ('${ta}','Farm A2') returning id`)).rows[0].id
+await db.query(`update curing_cycles set fuel_input_id='${diesel}' where id='${cyc2}'`)
+const role16=async(name,perms)=>{ const r=(await db.query(`insert into roles(tenant_id,name,is_system) values ('${ta}','${name}',false) returning id`)).rows[0].id
+  for (const p of perms) await db.query(`insert into role_permissions(tenant_id,role_id,permission) values ('${ta}','${r}','${p}')`); return r }
+const G='00000000-0000-0000-0000-0000000000a6', K='00000000-0000-0000-0000-0000000000a7'
+await db.exec(`insert into auth.users values ('${G}'),('${K}')`)
+await db.query(`insert into tenant_members(tenant_id,user_id,role_id) values ('${ta}','${G}','${await role16('Grader',['quality.grading.view','quality.grading.record'])}')`)
+await db.query(`insert into tenant_members(tenant_id,user_id,role_id) values ('${ta}','${K}','${await role16('Mechanic',['resources.machinery.view','resources.machinery.record'])}')`)
+const seasB=(await db.query(`insert into seasons(tenant_id,farm_id,label,starts_on,ends_on) values ('${tb}','${fb}','2026/27','2026-09-01','2027-08-31') returning id`)).rows[0].id
+const leB=(await db.query(`insert into labour_entries(tenant_id,farm_id,season_id,worked_on,worker_name,task) values ('${tb}','${fb}','${seasB}','2027-01-10','X','Y') returning id`)).rows[0].id   // a source in tenant B
+const onHand=async i=>Number((await db.query(`select coalesce(sum(qty_delta),0) s from inventory_transactions where input_id='${i}' and deleted_at is null`)).rows[0].s)
+const cost=(c)=>`insert into cost_entries(id,tenant_id,farm_id,season_id,category,amount,occurred_on,source_type,source_id) values ('${c.id??id16()}','${c.t??ta}','${c.f??farm}','${seas}','${c.cat}',${c.amt??10},'2027-01-10','${c.st}','${c.src}')`
+const txn=(x)=>`insert into inventory_transactions(id,tenant_id,farm_id,input_id,kind,qty_delta,unit_cost,occurred_on,source_type,source_id) values ('${x.id??id16()}','${x.t??ta}','${x.f??farm}','${x.inp}','${x.kind??'consumption'}',${x.qty},1.5,'2027-01-10','${x.st}','${x.src}')`
+const RLS=/row-level security/
+
+// The Field Recorder records each kind of source, then inserts the rows those records derive (plain inserts, as the app now sends them)
+await db.exec(`set role authenticated`); await as(D)
+const op16=(await db.query(`insert into operations(tenant_id,farm_id,season_id,target_type,field_id,op_type,occurred_on) values ('${ta}','${farm}','${seas}','field','${fld}','Top dressing','2027-01-10') returning id`)).rows[0].id
+const txOp=id16(); await db.query(txn({id:txOp,inp,qty:-50,st:'operation',src:op16}))
+const oi16=(await db.query(`insert into operation_inputs(tenant_id,operation_id,input_id,qty,unit_cost,inventory_txn_id) values ('${ta}','${op16}','${inp}',50,1.2,'${txOp}') returning id`)).rows[0].id
+const cOi=id16(); await db.query(cost({id:cOi,cat:'fertilizer',st:'operation_input',src:oi16,amt:60}))
+const le16=(await db.query(`insert into labour_entries(tenant_id,farm_id,season_id,worked_on,worker_name,task,pay_amount) values ('${ta}','${farm}','${seas}','2027-01-10','Rudo','Weeding',6) returning id`)).rows[0].id
+const cLe=id16(); await db.query(cost({id:cLe,cat:'labour',st:'labour_entry',src:le16,amt:6}))
+const ml16=id16()
+await db.query(`insert into machine_logs(id,tenant_id,farm_id,season_id,machine_id,field_id,kind,logged_on,hours,fuel_l,input_id) values ('${ml16}','${ta}','${farm}','${seas}','${tractor}','${fld}','use','2027-01-10',2,10,'${diesel}')`)
+const txMl=id16(); await db.query(txn({id:txMl,inp:diesel,qty:-10,st:'machine_log',src:ml16}))
+await db.query(`update machine_logs set fuel_txn_id='${txMl}' where id='${ml16}'`)   // the link is sent once the stock row is in (the app's second pass)
+const cMl=id16(), cMf=id16(); await db.query(cost({id:cMl,cat:'machinery',st:'machine_log',src:ml16})); await db.query(cost({id:cMf,cat:'fuel',st:'machine_fuel',src:ml16}))
+const hb16=(await db.query(`insert into harvest_batches(tenant_id,farm_id,season_id,field_id,code,harvested_on,green_weight_kg) values ('${ta}','${farm}','${seas}','${fld}','H-0016','2027-01-10',100) returning id`)).rows[0].id
+await db.query(cost({cat:'labour',st:'harvest_labour',src:hb16})); await db.query(cost({cat:'transport',st:'harvest_transport',src:hb16}))
+const tp16=(await db.query(`insert into transplants(tenant_id,farm_id,season_id,seedbed_id,field_id,occurred_on,qty) values ('${ta}','${farm}','${seas}','${sb}','${fld}','2027-01-10',10) returning id`)).rows[0].id
+await db.query(cost({cat:'labour',st:'transplant_labour',src:tp16}))
+const cl16=id16(); await db.query(`insert into curing_logs(id,tenant_id,cycle_id,logged_at,fuel_added_kg) values ('${cl16}','${ta}','${cyc2}','2027-01-23T08:00',5)`)
+const txCl=id16(); await db.query(txn({id:txCl,inp:diesel,qty:-5,st:'curing_log',src:cl16}))
+await db.query(`update curing_logs set fuel_txn_id='${txCl}' where id='${cl16}'`); await db.query(cost({cat:'curing',st:'curing_fuel',src:cl16}))
+// ... and is refused anything else
+await assert.rejects(()=>db.query(cost({cat:'labour',st:'manual',src:le16})), RLS)                        // a source type that is not a derived one
+await assert.rejects(()=>db.query(cost({cat:'fertilizer',st:'labour_entry',src:le16})), RLS)              // wrong category for the source
+await assert.rejects(()=>db.query(cost({cat:'labour',st:'labour_entry',src:hb16})), RLS)                  // the source id is not of that source type
+await assert.rejects(()=>db.query(cost({cat:'labour',st:'labour_entry',src:id16()})), RLS)                // no such source
+await assert.rejects(()=>db.query(cost({cat:'labour',st:'labour_entry',src:leB})), RLS)                   // a source outside tenant A
+await assert.rejects(()=>db.query(cost({cat:'labour',st:'labour_entry',src:le16,f:farm2})), RLS)         // the source belongs to another farm
+await assert.rejects(()=>db.query(cost({cat:'labour',st:'labour_entry',src:le16,t:tb,f:fb})))            // another tenant
+await assert.rejects(()=>db.query(cost({cat:'labour',st:'grading_labour',src:lot})), RLS)                 // no quality.grading.record
+await assert.rejects(()=>db.query(cost({cat:'labour',st:'cycle_load_labour',src:cyc2})), RLS)             // no curing.cycle.create
+await assert.rejects(()=>db.query(cost({cat:'labour',st:'cycle_offload_labour',src:cyc2})), RLS)          // no curing.cycle.close
+await assert.rejects(()=>db.query(txn({inp:diesel,qty:10,kind:'purchase',st:'machine_log',src:ml16})), RLS)   // never a purchase
+await assert.rejects(()=>db.query(txn({inp:diesel,qty:-1,kind:'adjustment',st:'machine_log',src:ml16})), RLS) // never an adjustment
+await assert.rejects(()=>db.query(txn({inp:diesel,qty:-11,st:'machine_log',src:ml16})), RLS)              // quantity must equal the log's litres
+await assert.rejects(()=>db.query(txn({inp,qty:-10,st:'machine_log',src:ml16})), RLS)                     // product must be the log's fuel
+await assert.rejects(()=>db.query(txn({inp:diesel,qty:-4,st:'curing_log',src:cl16})), RLS)
+await assert.rejects(()=>db.query(`${cost({cat:'labour',st:'labour_entry',src:le16})} on conflict (id) do nothing`), RLS)   // any ON CONFLICT needs select rights: hence plain inserts
+await assert.rejects(()=>db.query(cost({id:cLe,cat:'labour',st:'labour_entry',src:le16})), e=>e.code==='23505')            // a re-send meets the duplicate key...
+assert.equal((await db.query(`select row_sent('cost_entries','${ta}','${cLe}') s`)).rows[0].s, true)                         // ... and the app asks whether it is its own row
+assert.equal((await db.query(`select row_sent('cost_entries','${ta}','${id16()}') s`)).rows[0].s, false)
+assert.equal((await db.query(`select row_sent('sales','${ta}','${cLe}') s`)).rows[0].s, false)
+// no new read, update or delete rights
+assert.equal((await db.query(`select * from cost_entries`)).rows.length,0)
+assert.equal((await db.query(`update cost_entries set amount=1 where id='${cLe}'`)).affectedRows,0)
+assert.equal((await db.query(`delete from cost_entries where id='${cLe}'`)).affectedRows,0)
+assert.equal((await db.query(`update inventory_transactions set qty_delta=-1 where id='${txMl}'`)).affectedRows,0)   // stock stays readable to a Field Recorder (resources.inventory.view, unchanged) but not writable
+assert.equal((await db.query(`delete from inventory_transactions where id='${txMl}'`)).affectedRows,0)
+await assert.rejects(()=>db.query(`select derived_source_gone('cost_entries','${ta}','${farm}','labour_entry','${le16}','${cLe}')`), /permission denied/)
+await db.exec(`reset role`)
+assert.equal(Number((await db.query(`select amount from cost_entries where id='${cLe}'`)).rows[0].amount),6)
+assert.equal(Number((await db.query(`select qty_delta from inventory_transactions where id='${txMl}'`)).rows[0].qty_delta),-10)
+assert.equal((await db.query(`select count(*)::int n from cost_entries where source_id in ('${oi16}','${le16}','${ml16}','${hb16}','${tp16}','${cl16}')`)).rows[0].n, 8)
+// the helper says nothing to outsiders
+await db.exec(`set role authenticated`)
+for (const u of [B,X]) { await as(u); assert.equal((await db.query(`select derived_source_ok('cost_entries','${ta}','${farm}','labour_entry','${le16}','labour',null,null) s`)).rows[0].s, false)
+  assert.equal((await db.query(`select row_sent('cost_entries','${ta}','${cLe}') s`)).rows[0].s, false) }
+
+// rules follow permissions, not role names: custom roles insert for the sources their permissions cover
+await as(E); await db.query(cost({cat:'labour',st:'cycle_load_labour',src:cyc2}))                         // 'Cycle Starter': curing.cycle.create
+await assert.rejects(()=>db.query(cost({cat:'labour',st:'labour_entry',src:le16})), RLS)
+await as(G); await db.query(cost({cat:'labour',st:'grading_labour',src:lot}))                             // 'Grader': quality.grading.record
+await assert.rejects(()=>db.query(cost({cat:'labour',st:'cycle_load_labour',src:cyc2})), RLS)
+await as(M); await db.query(cost({cat:'labour',st:'labour_entry',src:le16}))                             // Farm Manager holds no finance.cost.edit either
+assert.ok((await db.query(`select * from cost_entries`)).rows.length >= 10)                                 // ... but keeps reading costs (finance.cost.view)
+// a mechanic who may record machine fuel but not view the store: the stock guard still works and reveals no quantity
+await as(K)
+assert.equal((await db.query(`select * from inventory_transactions`)).rows.length,0)
+const mlK=id16(); await db.query(`insert into machine_logs(id,tenant_id,farm_id,season_id,machine_id,kind,logged_on,fuel_l,input_id) values ('${mlK}','${ta}','${farm}','${seas}','${tractor}','fuel','2027-01-11',15,'${diesel}')`)
+const txK=id16(); await db.query(txn({id:txK,inp:diesel,qty:-15,st:'machine_log',src:mlK}))
+await db.query(`update machine_logs set fuel_txn_id='${txK}' where id='${mlK}'`); await db.query(cost({cat:'fuel',st:'machine_fuel',src:mlK}))
+const mlBig=id16(); await db.query(`insert into machine_logs(id,tenant_id,farm_id,season_id,machine_id,kind,logged_on,fuel_l,input_id) values ('${mlBig}','${ta}','${farm}','${seas}','${tractor}','fuel','2027-01-11',1000,'${diesel}')`)
+await assert.rejects(()=>db.query(txn({inp:diesel,qty:-1000,st:'machine_log',src:mlBig})), e=>e.message==='Insufficient stock')
+await as(B)
+await assert.rejects(()=>db.query(txn({inp:diesel,qty:-1,st:'machine_log',src:mlK})), e=>e.message==='Not a member of this farm')   // refused before any stock is summed
+// managers are unchanged: the Owner still upserts
+await as(A)
+const cOwn=id16(); await db.query(`${cost({id:cOwn,cat:'overhead',st:'manual',src:farm})} on conflict (id) do update set amount=excluded.amount`)
+await db.query(`${cost({id:cOwn,cat:'overhead',st:'manual',src:farm,amt:12})} on conflict (id) do update set amount=excluded.amount`)
+assert.equal(Number((await db.query(`select amount from cost_entries where id='${cOwn}'`)).rows[0].amount),12)
+await db.exec(`reset role`); assert.equal(await onHand(diesel), 50)   // 100 bought − 20 − 10 − 5 − 15
+
+// cancel_derived: a reversal, only after the source record is gone
+await db.query(`insert into cost_entries(id,tenant_id,farm_id,season_id,category,amount,occurred_on,source_type,source_id) values ('${id16()}','${ta}','${farm2}','${seas}','machinery',1,'2027-01-10','machine_log','${ml16}')`)
+const cFarm2=(await db.query(`select id from cost_entries where farm_id='${farm2}'`)).rows[0].id
+const adj=id16(); await db.query(`insert into inventory_transactions(id,tenant_id,farm_id,input_id,kind,qty_delta,occurred_on,source_type,source_id) values ('${adj}','${ta}','${farm}','${diesel}','adjustment',1,'2027-01-10','machine_log','${ml16}')`)
+const cancel=(t,id,st,src,ten=ta)=>db.query(`select cancel_derived('${t}','${ten}','${id}','${st}','${src}')`)
+await db.exec(`set role authenticated`); await as(D)
+await assert.rejects(()=>cancel('cost_entries',cMl,'machine_log',ml16), /source record is still live/)
+await db.query(`update machine_logs set deleted_at=now() where id='${ml16}'`)   // the Field Recorder reverses the log (an update they may make)
+await assert.rejects(()=>cancel('cost_entries',cMl,'machine_fuel',ml16), /no matching derived row/)       // source type must match the row
+await assert.rejects(()=>cancel('cost_entries',cMl,'machine_log',le16), /no matching derived row/)        // source id must match the row
+await assert.rejects(()=>cancel('inventory_transactions',adj,'machine_log',ml16), /no matching derived row/)   // only consumptions
+await assert.rejects(()=>cancel('cost_entries',cFarm2,'machine_log',ml16), /still live/)                  // the source must be in the row's own farm
+await assert.rejects(()=>cancel('sales',cMl,'machine_log',ml16), /only derived cost and stock rows/)
+await assert.rejects(()=>cancel('cost_entries',cLe,'labour_entry',le16), /still live/)
+for (const [u,why] of [[G,'no resources.machinery.record'],[B,'another tenant'],[X,'not a member'],[E2,'deactivated member']]) {
+  await as(u); await assert.rejects(()=>cancel('cost_entries',cMl,'machine_log',ml16), /permission denied/, why) }
+await as(B); await assert.rejects(()=>cancel('cost_entries',cMl,'machine_log',ml16,tb), /no matching derived row/)   // B's own tenant has no such row
+await as(D)
+for (const [t,id] of [['cost_entries',cMl],['cost_entries',cMf],['inventory_transactions',txMl]]) await cancel(t,id,id===cMf?'machine_fuel':'machine_log',ml16)
+await cancel('cost_entries',cMl,'machine_log',ml16)                                                       // a re-send is harmless
+await db.query(`update operation_inputs set deleted_at=now() where id='${oi16}'`)                          // removing an input line releases its draw and cost
+await cancel('inventory_transactions',txOp,'operation',op16); await cancel('cost_entries',cOi,'operation_input',oi16)
+await db.exec(`reset role`)
+assert.equal((await db.query(`select count(*)::int n from cost_entries where id in ('${cMl}','${cMf}','${cOi}') and deleted_at is not null`)).rows[0].n, 3)
+assert.equal((await db.query(`select count(*)::int n from inventory_transactions where id in ('${txMl}','${txOp}') and deleted_at is not null`)).rows[0].n, 2)
+assert.equal((await db.query(`select deleted_at from cost_entries where id='${cLe}'`)).rows[0].deleted_at, null)
+assert.equal((await db.query(`select deleted_at from cost_entries where id='${cFarm2}'`)).rows[0].deleted_at, null)
+assert.equal(await onHand(diesel), 61)   // the 10 L are back, plus the adjustment
+
+// activity events: a Field Recorder appends its own with a plain insert, cannot read anyone's, and can confirm a re-sent one
+await db.exec(`set role authenticated`); await as(D)
+const ev16=id16(), evIns=`insert into activity_log(id,tenant_id,farm_id,occurred_at,kind,verb,domain,summary) values ('${ev16}','${ta}','${farm}',now(),'action','machine.log','ops','Logged MF 375 use')`
+await db.query(evIns)
+await assert.rejects(()=>db.query(evIns), e=>e.code==='23505')
+await assert.rejects(()=>db.query(`${evIns.replace(ev16,id16())} on conflict (id) do nothing`), RLS)      // why the app no longer sends ignoreDuplicates
+assert.equal((await db.query(`select row_sent('activity_log','${ta}','${ev16}') s`)).rows[0].s, true)
+assert.equal((await db.query(`select * from activity_log`)).rows.length,0)                                 // not even its own: the cloud keeps none readable to it
+await as(A); assert.ok((await db.query(`select * from activity_log`)).rows.some(r=>r.id===ev16))
+await db.exec(`reset role`)
 console.log('ALL MIGRATION TESTS PASSED')
