@@ -1,0 +1,12 @@
+{
+  "name": "farmPLAN Tobacco — Field",
+  "short_name": "farmPLAN Field",
+  "description": "Offline field terminal for tobacco farm records",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#ffffff",
+  "theme_color": "#265934",
+  "icons": [{ "src": "icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any maskable" }]
+}

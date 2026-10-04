@@ -1,0 +1,14 @@
+@import "tailwindcss";
+@theme {
+  --font-sans: "Inter", ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  --color-brand-50: #f0f7f1; --color-brand-100: #dcecde; --color-brand-200: #b9d9be; --color-brand-600: #2f6b3f; --color-brand-700: #265934; --color-brand-800: #1f472a;
+}
+html, body, #root { height: 100%; }
+body { font-family: var(--font-sans); color: #1f2937; background: #f7f8f7; font-size: 14px; -webkit-font-smoothing: antialiased; }
+table { border-collapse: collapse; }
+input, select, textarea { font: inherit; }
+:focus-visible { outline: 2px solid var(--color-brand-600); outline-offset: 1px; }
+/* Wide tables scroll inside their card; a soft shadow at an edge shows there is more to scroll to (it disappears at the end). */
+.scroll-x { overflow-x: auto; -webkit-overflow-scrolling: touch;
+  background: linear-gradient(to right, #fff 30%, #fff0) left / 2rem 100% no-repeat local, linear-gradient(to left, #fff 30%, #fff0) right / 2rem 100% no-repeat local,
+    radial-gradient(farthest-side at 0 50%, #0002, #0000) left / .75rem 100% no-repeat scroll, radial-gradient(farthest-side at 100% 50%, #0002, #0000) right / .75rem 100% no-repeat scroll; }
