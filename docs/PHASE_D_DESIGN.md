@@ -1,6 +1,6 @@
 # Phase D design — fuel from inventory; labour and machine logs linked to operations
 
-**Status: proposal, awaiting the owner's approval. No code, schema or migration has been written.**
+**Status: built (schema v14, cloud `0015_fuel_and_links.sql`) with the recommended answer to each decision below. See README → Phase D.**
 
 ## The problem today (from the code)
 | Event | Stock | Cost booked | Gap |

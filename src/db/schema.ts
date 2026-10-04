@@ -1,5 +1,5 @@
 // Local SQLite schema. Mirrors supabase/migrations/0001_foundation.sql so rows sync 1:1.
-export const SCHEMA_VERSION = 13
+export const SCHEMA_VERSION = 14
 
 const common = `
   created_at TEXT NOT NULL DEFAULT (datetime('now')),
@@ -252,7 +252,7 @@ CREATE TABLE IF NOT EXISTS labour_entries (
   id TEXT PRIMARY KEY, tenant_id TEXT NOT NULL, farm_id TEXT NOT NULL REFERENCES farms(id),
   season_id TEXT NOT NULL REFERENCES seasons(id), field_id TEXT REFERENCES fields(id), worked_on TEXT NOT NULL,
   worker_name TEXT NOT NULL, task TEXT NOT NULL, hours REAL CHECK (hours >= 0), pay_amount REAL NOT NULL DEFAULT 0 CHECK (pay_amount >= 0),
-  remarks TEXT, created_by TEXT, ${common});
+  remarks TEXT, created_by TEXT, operation_id TEXT REFERENCES operations(id), ${common});
 CREATE INDEX IF NOT EXISTS ix_labour_season ON labour_entries(season_id) WHERE deleted_at IS NULL;
 
 -- ---- Phase 5: budgets and the read-only BI view layer ----
@@ -291,13 +291,14 @@ CREATE TABLE IF NOT EXISTS machines (
   kind TEXT NOT NULL DEFAULT 'tractor' CHECK (kind IN ('tractor','implement','vehicle','pump','generator','other')),
   make_model TEXT, reg_no TEXT, purchased_on TEXT, purchase_cost REAL CHECK (purchase_cost >= 0),
   hourly_rate REAL NOT NULL DEFAULT 0 CHECK (hourly_rate >= 0), service_interval_hours REAL CHECK (service_interval_hours > 0),
-  active INTEGER NOT NULL DEFAULT 1, notes TEXT, ${common});
+  active INTEGER NOT NULL DEFAULT 1, notes TEXT, fuel_input_id TEXT REFERENCES inputs(id), ${common});
 CREATE TABLE IF NOT EXISTS machine_logs (
   id TEXT PRIMARY KEY, tenant_id TEXT NOT NULL, farm_id TEXT NOT NULL REFERENCES farms(id), season_id TEXT NOT NULL REFERENCES seasons(id),
   machine_id TEXT NOT NULL REFERENCES machines(id), field_id TEXT REFERENCES fields(id),
   kind TEXT NOT NULL CHECK (kind IN ('use','fuel','service','repair')), logged_on TEXT NOT NULL,
   hours REAL CHECK (hours >= 0), fuel_l REAL CHECK (fuel_l >= 0), cost REAL NOT NULL DEFAULT 0 CHECK (cost >= 0),
-  description TEXT, operator TEXT, created_by TEXT, ${common},
+  description TEXT, operator TEXT, created_by TEXT,
+  input_id TEXT REFERENCES inputs(id), fuel_txn_id TEXT REFERENCES inventory_transactions(id), operation_id TEXT REFERENCES operations(id), ${common},
   CHECK (kind <> 'use' OR hours IS NOT NULL), CHECK (kind <> 'fuel' OR fuel_l IS NOT NULL));
 CREATE INDEX IF NOT EXISTS ix_mlog_machine ON machine_logs(machine_id) WHERE deleted_at IS NULL;
 DROP VIEW IF EXISTS bi_machine_logs; CREATE VIEW bi_machine_logs AS SELECT se.label AS season, m.name AS machine, m.kind AS machine_kind, l.kind AS log_kind, l.logged_on, f.field_no, l.hours, l.fuel_l, l.cost, l.description, l.operator

@@ -201,6 +201,19 @@ The main eval set grew from 58 to 82 questions (keyword router: 100%); the unsee
 * **Reload keeps you signed in:** the sign-in is kept per tab (`sessionStorage`), so a reload stays on the same page. It ends on Sign out, when the tab or app window closes, after 12 hours, or if the user has been deactivated (the role's current permissions are re-read). A fresh sign-in still opens the Dashboard.
 * Tests: `src/services/reorder.test.ts`, `src/ui.session.test.tsx`, the 0014 block in `tests/migration.test.mjs`.
 
+## Phase D — fuel from inventory; labour and machine logs linked to operations (schema v14)
+Design and reasoning: `docs/PHASE_D_DESIGN.md`. Decisions taken: fuel input lines are refused only when a machine line has litres; old operations are left untouched; each machine has a default fuel product, overridable per log; phone entries are not attached to operations yet.
+
+| Area | What you get |
+|---|---|
+| Fuel | Machinery → a machine's **Fuel product**. A fuel log, or a use log with litres, draws the litres from that stock at the average cost (one consumption + one `fuel` cost, like curing). "Bought outside the store" keeps a typed cost and leaves stock alone. Deleting a log puts the litres back. The field-terminal Machine tile draws from stock the same way. |
+| Operations | Record operation has **Workers** lines (name, hours, pay) and **Machines** lines (machine, hours, litres) instead of the free-text labour and machinery boxes. They become labour entries and machine use logs linked to the operation, in one transaction; costs come only from those, so nothing is booked twice. Machine hours on operations now count towards service-due. Deleting the operation reverses its entries, logs, stock and costs. |
+| Guards | Retired boxes are refused for new operations; a fuel input line is refused when a machine line has litres; worker / machine lines need `resources.labour.record` / `resources.machinery.record`. |
+| Old data | Operations recorded before v14 keep their labour/machinery values and cost rows (season totals unchanged); they show "Machine (old entry)" and never count as machine hours. Old fuel logs are not drawn from stock retroactively. |
+| Cloud | `0015_fuel_and_links.sql`: five nullable columns with composite tenant FKs, and a trigger that a log's fuel draw matches its stock movement (same farm, product and litres, made by that log). RLS and permissions unchanged. **Apply after every device runs v14.** |
+
+Known limit (pre-existing, found while building this): over the **cloud relay**, a phone signed in with a field role (e.g. Field Recorder) cannot insert stock movements (`resources.inventory.manage`) or cost rows (`finance.cost.edit`) in the cloud, so those rows are quarantined on the phone. This already applied to operation inputs and labour pay; machine fuel now hits it too. Over the **Wi-Fi hub** it does not apply (the office PC syncs everything under its own account). Tests: `src/services/phaseD.test.ts`, `src/ui.phaseD.test.tsx`, the 0015 block in `tests/migration.test.mjs`.
+
 ## Phase 8 — Wi-Fi hub (no internet)
 
 | Area | What you get |
@@ -234,7 +247,7 @@ npm run tauri build  # installers
 Data is stored in a local SQLite database (sql.js, persisted to IndexedDB inside the Tauri webview; Phase 2 moves persistence to a native file).
 
 ## Supabase
-Apply `supabase/migrations/0001_foundation.sql`, `0002_claim_tenant.sql`, `0003_curing_chain.sql`, `0004_grading_marketing.sql`, `0005_contracts.sql`, then `0006_sharing.sql`, `0007_field_devices.sql`, `0008_budgets.sql`, `0009_machinery.sql`, `0010_allocation.sql`, `0011_buyers.sql`, `0012_activity_log.sql`, `0013_brain_chat_perms.sql`, `0014_reorder_level.sql` (SQL editor or `supabase db push`). Create a user (Auth), then in **Sync & backup** enter project URL, publishable key and credentials. The device claims its local tenant id via `claim_tenant`, pushes, then pulls.
+Apply `supabase/migrations/0001_foundation.sql`, `0002_claim_tenant.sql`, `0003_curing_chain.sql`, `0004_grading_marketing.sql`, `0005_contracts.sql`, then `0006_sharing.sql`, `0007_field_devices.sql`, `0008_budgets.sql`, `0009_machinery.sql`, `0010_allocation.sql`, `0011_buyers.sql`, `0012_activity_log.sql`, `0013_brain_chat_perms.sql`, `0014_reorder_level.sql`, `0015_fuel_and_links.sql` (SQL editor or `supabase db push`). Create a user (Auth), then in **Sync & backup** enter project URL, publishable key and credentials. The device claims its local tenant id via `claim_tenant`, pushes, then pulls.
 
 ## Design rules
 - Everything is an event: purchases, applications, operations create linked ledger rows; costs are derived, never retyped.

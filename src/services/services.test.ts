@@ -57,7 +57,7 @@ describe('inventory-linked operations', () => {
 
   it('applying fertilizer consumes stock and creates cost atomically', () => {
     recordOperation(owner, { target: { type: 'field', id: fieldId }, season_id: seasonId, op_type: 'Fertilizing', phase: 'land_prep',
-      occurred_on: '2026-10-02', labour_cost: 20, inputs: [{ input_id: fert, qty: 100 }] })
+      occurred_on: '2026-10-02', workers: [{ worker_name: 'Crew', pay: 20 }], inputs: [{ input_id: fert, qty: 100 }] })
     expect(stockOf(owner, fert)).toBe(400)
     const s = seasonCostSummary(owner, seasonId)
     expect(s.total).toBe(140) // 100kg*1.2 + 20 labour
@@ -68,7 +68,7 @@ describe('inventory-linked operations', () => {
   it('rolls back everything when stock is insufficient', () => {
     const before = db.get<{ n: number }>(`SELECT COUNT(*) n FROM operations`)!.n
     expect(() => recordOperation(owner, { target: { type: 'field', id: fieldId }, season_id: seasonId, op_type: 'Fertilizing',
-      occurred_on: '2026-10-02', labour_cost: 50, inputs: [{ input_id: fert, qty: 501 }] })).toThrow(/Insufficient stock/)
+      occurred_on: '2026-10-02', workers: [{ worker_name: 'Crew', pay: 50 }], inputs: [{ input_id: fert, qty: 501 }] })).toThrow(/Insufficient stock/)
     expect(db.get<{ n: number }>(`SELECT COUNT(*) n FROM operations`)!.n).toBe(before)
     expect(db.get<{ n: number }>(`SELECT COUNT(*) n FROM cost_entries`)!.n).toBe(0)
     expect(stockOf(owner, fert)).toBe(500)
@@ -76,7 +76,7 @@ describe('inventory-linked operations', () => {
 
   it('deleting an operation restores stock and removes costs', () => {
     const op = recordOperation(owner, { target: { type: 'field', id: fieldId }, season_id: seasonId, op_type: 'Fertilizing',
-      occurred_on: '2026-10-02', machinery_cost: 30, inputs: [{ input_id: fert, qty: 100 }] })
+      occurred_on: '2026-10-02', workers: [{ worker_name: 'Crew', pay: 30 }], inputs: [{ input_id: fert, qty: 100 }] })
     deleteOperation(owner, op)
     expect(stockOf(owner, fert)).toBe(500)
     expect(seasonCostSummary(owner, seasonId).total).toBe(0)
@@ -109,7 +109,7 @@ describe('seedbeds', () => {
     const sb = createSeedbed(owner, { season_id: seasonId, bed_length_m: 10, bed_width_m: 1.2, bed_count: 20, expected_seedlings: 50000 })
     const seed = createInput(owner, { name: 'KRK26 seed', category: 'seed', unit: 'g' })
     recordPurchase(owner, { input_id: seed, qty: 100, unit_cost: 2, occurred_on: '2026-09-10' })
-    recordOperation(owner, { target: { type: 'seedbed', id: sb }, op_type: 'Sowing', occurred_on: '2026-09-15', labour_cost: 10, inputs: [{ input_id: seed, qty: 50 }] })
+    recordOperation(owner, { target: { type: 'seedbed', id: sb }, op_type: 'Sowing', occurred_on: '2026-09-15', workers: [{ worker_name: 'Crew', pay: 10 }], inputs: [{ input_id: seed, qty: 50 }] })
     const row = listSeedbeds(owner)[0]
     expect(row.code).toBe('SB-001'); expect(row.area_m2).toBe(240)
     expect(row.status).toBe('sown'); expect(row.sown_on).toBe('2026-09-15'); expect(row.total_cost).toBe(110)

@@ -1,7 +1,11 @@
 import { type Ctx, require, can, need, isDate, round2 } from './context'
 import { addCost, assertSeasonOpen, nonNeg, removeCostsFor } from './util'
 
-export interface LabourInput { season_id: string; field_id?: string | null; worked_on: string; worker_name: string; task: string; hours?: number | null; pay_amount?: number; remarks?: string }
+export interface LabourInput { season_id: string; field_id?: string | null; worked_on: string; worker_name: string; task: string; hours?: number | null; pay_amount?: number; remarks?: string
+  /** Set by recordOperation when the entry is one of an operation's worker lines. */
+  operation_id?: string | null
+  /** Books the pay against this seedbed (for worker lines of a seedbed operation); labour entries themselves are per field. */
+  seedbed_id?: string | null }
 
 /** One labour entry per worker per task per day. Pay becomes a 'labour' cost against the season (and field, when given). */
 export function recordLabour(ctx: Ctx, i: LabourInput): string {
@@ -12,8 +16,8 @@ export function recordLabour(ctx: Ctx, i: LabourInput): string {
   assertSeasonOpen(ctx, i.season_id)
   return ctx.db.tx(() => {
     const id = ctx.db.insert('labour_entries', { tenant_id: ctx.tenantId, farm_id: ctx.farmId, season_id: i.season_id, field_id: i.field_id ?? null, worked_on: i.worked_on,
-      worker_name: i.worker_name.trim(), task: i.task.trim(), hours: i.hours ?? null, pay_amount: round2(i.pay_amount ?? 0), remarks: i.remarks ?? null, created_by: ctx.actor?.id ?? null })
-    addCost(ctx, { seasonId: i.season_id, category: 'labour', amount: i.pay_amount ?? 0, on: i.worked_on, sourceType: 'labour_entry', sourceId: id, fieldId: i.field_id ?? null, note: `${i.worker_name.trim()} — ${i.task.trim()}` })
+      worker_name: i.worker_name.trim(), task: i.task.trim(), hours: i.hours ?? null, pay_amount: round2(i.pay_amount ?? 0), remarks: i.remarks ?? null, created_by: ctx.actor?.id ?? null, operation_id: i.operation_id ?? null })
+    addCost(ctx, { seasonId: i.season_id, category: 'labour', amount: i.pay_amount ?? 0, on: i.worked_on, sourceType: 'labour_entry', sourceId: id, fieldId: i.field_id ?? null, seedbedId: i.seedbed_id ?? null, note: `${i.worker_name.trim()} — ${i.task.trim()}` })
     ctx.db.audit(ctx.actor?.id ?? null, 'labour.record', 'labour_entries', id, { worker: i.worker_name, task: i.task })
     return id
   })
@@ -26,13 +30,14 @@ export function deleteLabour(ctx: Ctx, id: string) {
   ctx.db.tx(() => { ctx.db.softDelete('labour_entries', id); removeCostsFor(ctx, [id]); ctx.db.audit(ctx.actor?.id ?? null, 'labour.delete', 'labour_entries', id) })
 }
 
-export interface LabourRow { id: string; worked_on: string; worker_name: string; task: string; field_no: string | null; hours: number | null; pay_amount: number | null; remarks: string | null; season_label: string }
+export interface LabourRow { id: string; worked_on: string; worker_name: string; task: string; field_no: string | null; hours: number | null; pay_amount: number | null; remarks: string | null; season_label: string; operation_id: string | null; operation: string | null }
 export function listLabour(ctx: Ctx, f: { seasonId?: string; limit?: number } = {}): LabourRow[] {
   require(ctx, 'resources.labour.view')
   const where = ['l.farm_id=?', 'l.deleted_at IS NULL']; const p: (string | number)[] = [ctx.farmId]
   if (f.seasonId) { where.push('l.season_id=?'); p.push(f.seasonId) }
   const pay = can(ctx, 'finance.cost.view')
-  return ctx.db.all<LabourRow>(`SELECT l.id, l.worked_on, l.worker_name, l.task, fl.field_no, l.hours, l.pay_amount, l.remarks, se.label season_label FROM labour_entries l
-    JOIN seasons se ON se.id=l.season_id LEFT JOIN fields fl ON fl.id=l.field_id WHERE ${where.join(' AND ')} ORDER BY l.worked_on DESC, l.created_at DESC LIMIT ${Math.min(f.limit ?? 300, 1000)}`, p)
+  return ctx.db.all<LabourRow>(`SELECT l.id, l.worked_on, l.worker_name, l.task, fl.field_no, l.hours, l.pay_amount, l.remarks, se.label season_label, l.operation_id,
+      CASE WHEN o.id IS NULL THEN NULL ELSE o.op_type || ' (' || o.occurred_on || ')' END operation FROM labour_entries l
+    JOIN seasons se ON se.id=l.season_id LEFT JOIN fields fl ON fl.id=l.field_id LEFT JOIN operations o ON o.id=l.operation_id WHERE ${where.join(' AND ')} ORDER BY l.worked_on DESC, l.created_at DESC LIMIT ${Math.min(f.limit ?? 300, 1000)}`, p)
     .map(r => ({ ...r, pay_amount: pay ? r.pay_amount : null }))
 }

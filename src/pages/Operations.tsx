@@ -4,6 +4,7 @@ import { listFields } from '../services/fields'
 import { listSeedbeds } from '../services/seedbeds'
 import { listSeasons } from '../services/seasons'
 import { listInputs } from '../services/inventory'
+import { listMachines } from '../services/machinery'
 import { useCan, useCtx, useData, useRun, fmt, today } from '../ui/hooks'
 import { Button, Card, Denied, Grid, Input, Label, Modal, NumberInput, PageHeader, Select, Table, Td, Textarea } from '../ui/kit'
 import { RecLink } from '../ui/links'
@@ -22,6 +23,10 @@ export function RecordOperation({ target, seasonId, onClose }: { target?: Target
   const [phase, setPhase] = useState<'land_prep' | 'field'>('field')
   const [f, setF] = useState<Partial<OperationInput>>({ occurred_on: today(), op_type: '' })
   const [lines, setLines] = useState<{ input_id: string; qty?: number; rate_note?: string }[]>([])
+  const [workers, setWorkers] = useState<{ worker_name: string; hours?: number; pay?: number }[]>([])
+  const [machineLines, setMachineLines] = useState<{ machine_id: string; hours?: number; fuel_l?: number }[]>([])
+  const machines = (useData(c => can('resources.machinery.view') ? listMachines(c) : []) ?? []).filter(m => m.active)
+  const canWorkers = can('resources.labour.record'); const canMachines = can('resources.machinery.record') && machines.length > 0
   const effType = target?.type ?? tType
   const types = effType === 'seedbed' ? OPERATION_TYPES.seedbed : OPERATION_TYPES[phase]
   const showCost = can('finance.cost.edit')
@@ -32,7 +37,9 @@ export function RecordOperation({ target, seasonId, onClose }: { target?: Target
     const ok = await run(() => recordOperation(ctx, {
       ...(f as OperationInput), target: { type: effType, id: target?.id ?? tId }, season_id: effType === 'field' ? season : undefined,
       phase: effType === 'field' ? phase : undefined,
-      inputs: lines.filter(l => l.input_id && l.qty).map(l => ({ input_id: l.input_id, qty: l.qty!, rate_note: l.rate_note })) }), 'Operation recorded')
+      inputs: lines.filter(l => l.input_id && l.qty).map(l => ({ input_id: l.input_id, qty: l.qty!, rate_note: l.rate_note })),
+      workers: workers.filter(w => w.worker_name.trim()).map(w => ({ worker_name: w.worker_name, hours: w.hours ?? null, pay: w.pay ?? 0 })),
+      machines: machineLines.filter(m => m.machine_id).map(m => ({ machine_id: m.machine_id, hours: m.hours ?? 0, fuel_l: m.fuel_l ?? null })) }), 'Operation recorded')
     if (ok) onClose()
   }
   return (
@@ -65,18 +72,25 @@ export function RecordOperation({ target, seasonId, onClose }: { target?: Target
           <p className="text-xs text-gray-500 mt-2">Rates must follow the product label and your approved agronomic protocol; the system records what was applied, it does not prescribe rates.</p>
         </fieldset>
 
-        <Grid cols={4}>
-          <Label text="Workers"><NumberInput value={f.labour_workers} onChange={n => set('labour_workers', n)} /></Label>
-          <Label text="Labour hours"><NumberInput step="0.5" value={f.labour_hours} onChange={n => set('labour_hours', n)} /></Label>
-          {showCost && <Label text="Labour cost"><NumberInput step="0.01" value={f.labour_cost} onChange={n => set('labour_cost', n)} /></Label>}
-          <Label text="Operator"><Input value={f.operator ?? ''} onChange={e => set('operator', e.target.value)} /></Label>
-        </Grid>
-        {effType === 'field' && <Grid cols={4}>
-          <Label text="Tractor / equipment"><Input value={f.machinery_asset ?? ''} onChange={e => set('machinery_asset', e.target.value)} /></Label>
-          <Label text="Machine hours"><NumberInput step="0.1" value={f.machinery_hours} onChange={n => set('machinery_hours', n)} /></Label>
-          <Label text="Fuel used (L)"><NumberInput step="0.1" value={f.machinery_fuel_l} onChange={n => set('machinery_fuel_l', n)} /></Label>
-          {showCost && <Label text="Machinery cost"><NumberInput step="0.01" value={f.machinery_cost} onChange={n => set('machinery_cost', n)} /></Label>}
-        </Grid>}
+        {canWorkers && <fieldset className="border border-gray-200 rounded-md p-3"><legend className="px-1 text-sm font-medium">Workers <span className="font-normal text-gray-500">(each becomes a labour entry)</span></legend>
+          {workers.map((w, i) => <div key={i} className="grid grid-cols-12 gap-2 mb-2">
+            <div className="col-span-12 sm:col-span-6"><Input aria-label={`Worker ${i + 1} name`} placeholder="Name" value={w.worker_name} onChange={e => setWorkers(workers.map((x, j) => j === i ? { ...x, worker_name: e.target.value } : x))} /></div>
+            <div className={showCost ? 'col-span-5 sm:col-span-2' : 'col-span-11 sm:col-span-5'}><NumberInput aria-label={`Worker ${i + 1} hours`} placeholder="Hours" step="0.5" min={0} value={w.hours} onChange={n => setWorkers(workers.map((x, j) => j === i ? { ...x, hours: n } : x))} /></div>
+            {showCost && <div className="col-span-6 sm:col-span-3"><NumberInput aria-label={`Worker ${i + 1} pay`} placeholder="Pay" step="0.01" min={0} value={w.pay} onChange={n => setWorkers(workers.map((x, j) => j === i ? { ...x, pay: n } : x))} /></div>}
+            <div className="col-span-1"><Button type="button" variant="ghost" onClick={() => setWorkers(workers.filter((_, j) => j !== i))} aria-label={`Remove worker ${i + 1}`}>×</Button></div></div>)}
+          <Button type="button" small onClick={() => setWorkers([...workers, { worker_name: '' }])}>+ Add worker</Button>
+        </fieldset>}
+        {canMachines && <fieldset className="border border-gray-200 rounded-md p-3"><legend className="px-1 text-sm font-medium">Machines <span className="font-normal text-gray-500">(each becomes a machine log; litres come out of its fuel stock)</span></legend>
+          {machineLines.map((m, i) => { const mc = machines.find(x => x.id === m.machine_id); return <div key={i} className="mb-2"><div className="grid grid-cols-12 gap-2">
+            <div className="col-span-12 sm:col-span-6"><Select aria-label={`Machine ${i + 1}`} value={m.machine_id} onChange={e => setMachineLines(machineLines.map((x, j) => j === i ? { ...x, machine_id: e.target.value } : x))}><option value="">Machine…</option>{machines.map(x => <option key={x.id} value={x.id}>{x.name}</option>)}</Select></div>
+            <div className="col-span-5 sm:col-span-2"><NumberInput aria-label={`Machine ${i + 1} hours`} placeholder="Hours" step="0.1" min={0} value={m.hours} onChange={n => setMachineLines(machineLines.map((x, j) => j === i ? { ...x, hours: n } : x))} /></div>
+            <div className="col-span-6 sm:col-span-3"><NumberInput aria-label={`Machine ${i + 1} litres`} placeholder="Fuel (L)" step="0.1" min={0} value={m.fuel_l} onChange={n => setMachineLines(machineLines.map((x, j) => j === i ? { ...x, fuel_l: n } : x))} /></div>
+            <div className="col-span-1"><Button type="button" variant="ghost" onClick={() => setMachineLines(machineLines.filter((_, j) => j !== i))} aria-label={`Remove machine ${i + 1}`}>×</Button></div></div>
+            {mc && (m.fuel_l ?? 0) > 0 && <p className="text-xs text-gray-600 mt-0.5">{mc.fuel_name ? `${m.fuel_l} L will be drawn from ${mc.fuel_name}.` : `${mc.name} has no fuel product, so the litres are recorded without touching stock. Set one under Machinery.`}</p>}</div> })}
+          <Button type="button" small onClick={() => setMachineLines([...machineLines, { machine_id: '' }])}>+ Add machine</Button>
+          <p className="text-xs text-gray-500 mt-2">Put diesel here, not as an input above, so it is drawn and costed once.</p>
+        </fieldset>}
+        <Grid cols={3}><Label text="Operator"><Input value={f.operator ?? ''} onChange={e => set('operator', e.target.value)} /></Label></Grid>
         <Grid><Label text="Weather"><Input value={f.weather ?? ''} onChange={e => set('weather', e.target.value)} placeholder="e.g. dry, 28°C" /></Label>
           <Label text="Remarks"><Textarea value={f.remarks ?? ''} onChange={e => set('remarks', e.target.value)} /></Label></Grid>
         <div className="flex justify-end gap-2"><Button type="button" onClick={onClose}>Cancel</Button><Button variant="primary" type="submit">Record operation</Button></div>
@@ -103,7 +117,8 @@ export default function Operations() {
           {can('production.operation.record') && <Button variant="primary" onClick={() => setOpen(true)}>Record operation</Button>}</>} />
       <Card><Table head={['Date', 'Season', 'Target', 'Operation', 'Inputs', 'Operator', ...(showCost ? [{ label: 'Cost', right: true }] : []), 'Remarks', '']} empty="No operations recorded.">
         {shown.map(o => (<tr key={o.id} className="hover:bg-gray-50"><Td>{fmt.date(o.occurred_on)}</Td><Td>{o.season_label}</Td><Td className="font-medium">{o.target_type === 'field' ? <>Field <RecLink kind="field" code={o.target_code} /></> : o.target_code}</Td>
-          <Td>{o.op_type}</Td><Td className="max-w-xs">{o.inputs || '—'}</Td><Td>{o.operator ?? '—'}</Td>{showCost && <Td right>{fmt.money(o.cost)}</Td>}<Td className="max-w-xs">{o.remarks ?? ''}</Td>
+          <Td>{o.op_type}{o.workers && <div className="text-xs text-gray-600">Workers: {o.workers}</div>}{o.machines && <div className="text-xs text-gray-600">Machines: {o.machines}</div>}
+            {o.legacy_machinery && <div className="text-xs text-gray-500" title="Recorded before machine logs; not counted in machine hours">Machine (old entry): {o.legacy_machinery}</div>}</Td><Td className="max-w-xs">{o.inputs || '—'}</Td><Td>{o.operator ?? '—'}</Td>{showCost && <Td right>{fmt.money(o.cost)}</Td>}<Td className="max-w-xs">{o.remarks ?? ''}</Td>
           <Td className="text-right">{can('production.operation.delete') && <Button small variant="danger" onClick={() => confirm('Delete this operation? Stock and costs will be reversed.') && run(() => deleteOperation(ctx, o.id), 'Operation reversed')}>Delete</Button>}</Td></tr>))}
       </Table></Card>
       {open && <RecordOperation onClose={() => setOpen(false)} />}

@@ -396,4 +396,27 @@ await assert.rejects(()=>db.query(`update inputs set reorder_level=-1 where id='
 await as(D); assert.equal((await db.query(`update inputs set reorder_level=5 where id='${inp}' returning id`)).rows.length,0)   // Field Recorder can view stock, not manage it
 await as(B); assert.equal((await db.query(`update inputs set reorder_level=5 where id='${inp}' returning id`)).rows.length,0)   // another tenant cannot touch it
 await db.exec(`reset role`); assert.equal(Number((await db.query(`select reorder_level from inputs where id='${inp}'`)).rows[0].reorder_level),100)
+
+// ---- 0015: machine fuel from inventory; labour and machine logs linked to operations ----
+const grants15=(await db.query(`select count(*)::int n from role_permissions`)).rows[0].n
+await db.exec(readFileSync('supabase/migrations/0015_fuel_and_links.sql','utf8'))
+assert.equal((await db.query(`select count(*)::int n from role_permissions`)).rows[0].n, grants15)   // nothing re-granted
+await db.exec(`set role authenticated`); await as(A)
+const diesel=(await db.query(`insert into inputs(tenant_id,name,category,unit) values ('${ta}','Diesel','fuel','L') returning id`)).rows[0].id
+await db.query(`insert into inventory_transactions(tenant_id,farm_id,input_id,kind,qty_delta,unit_cost,occurred_on) values ('${ta}','${farm}','${diesel}','purchase',100,1.5,'2027-01-01')`)
+const tractor=(await db.query(`insert into machines(tenant_id,farm_id,name,fuel_input_id) values ('${ta}','${farm}','MF 375','${diesel}') returning id`)).rows[0].id
+const op15=(await db.query(`insert into operations(tenant_id,farm_id,season_id,target_type,field_id,op_type,occurred_on) values ('${ta}','${farm}','${seas}','field','${fld}','Ploughing','2027-01-05') returning id`)).rows[0].id
+const log15='00000000-0000-0000-0000-0000000000a1', txn15=(await db.query(`insert into inventory_transactions(tenant_id,farm_id,input_id,kind,qty_delta,unit_cost,occurred_on,source_type,source_id)
+  values ('${ta}','${farm}','${diesel}','consumption',-20,1.5,'2027-01-05','machine_log','${log15}') returning id`)).rows[0].id
+await db.query(`insert into machine_logs(id,tenant_id,farm_id,season_id,machine_id,field_id,kind,logged_on,hours,fuel_l,input_id,fuel_txn_id,operation_id)
+  values ('${log15}','${ta}','${farm}','${seas}','${tractor}','${fld}','use','2027-01-05',3,20,'${diesel}','${txn15}','${op15}')`)
+await assert.rejects(()=>db.query(`update machine_logs set fuel_l=25 where id='${log15}'`), /does not match its stock movement/)   // litres must equal the draw
+await assert.rejects(()=>db.query(`insert into machine_logs(tenant_id,farm_id,season_id,machine_id,kind,logged_on,fuel_l,input_id,fuel_txn_id)
+  values ('${ta}','${farm}','${seas}','${tractor}','fuel','2027-01-06',20,'${diesel}','${txn15}')`), /does not match its stock movement/)   // a draw belongs to one log only
+await db.query(`insert into labour_entries(tenant_id,farm_id,season_id,worked_on,worker_name,task,operation_id) values ('${ta}','${farm}','${seas}','2027-01-05','Tendai','Ploughing','${op15}')`)
+await as(B)
+await assert.rejects(()=>db.query(`insert into machines(tenant_id,farm_id,name,fuel_input_id) values ('${tb}','${fb}','Stolen fuel','${diesel}')`))   // composite FK: another tenant's fuel
+await assert.rejects(()=>db.query(`insert into labour_entries(tenant_id,farm_id,season_id,worked_on,worker_name,task,operation_id) values ('${tb}','${fb}','${seas}','2027-01-05','X','Y','${op15}')`))
+assert.equal((await db.query(`select * from machine_logs`)).rows.length,0)   // RLS unchanged: B sees none of A's logs
+await db.exec(`reset role`)
 console.log('ALL MIGRATION TESTS PASSED')

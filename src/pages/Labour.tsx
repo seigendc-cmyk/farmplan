@@ -23,7 +23,7 @@ export default function Labour() {
       <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 mb-4"><Stat label="Entries" value={rows.length} /><Stat label="Hours" value={fmt.num(hours, 1)} />{showPay && <Stat label="Pay" value={fmt.money(pay)} />}</div>
       <Card><Table head={['Date', 'Worker', 'Task', 'Field', { label: 'Hours', right: true }, ...(showPay ? [{ label: 'Pay', right: true }] : []), 'Notes', '']} empty="No labour recorded for this season.">
         {rows.map(r => <tr key={r.id}><Td>{fmt.date(r.worked_on)}</Td><Td className="font-medium">{r.worker_name}</Td><Td>{r.task}</Td><Td><RecLink kind="field" code={r.field_no} /></Td><Td right>{fmt.num(r.hours, 1)}</Td>
-          {showPay && <Td right>{fmt.money(r.pay_amount)}</Td>}<Td>{r.remarks ?? ''}</Td>
+          {showPay && <Td right>{fmt.money(r.pay_amount)}</Td>}<Td>{r.remarks ?? ''}{r.operation && <div className="text-xs text-gray-500">part of {r.operation}</div>}</Td>
           <Td className="text-right">{record && <Button small variant="danger" onClick={() => { if (window.confirm('Delete this entry and its cost?')) void run(() => deleteLabour(ctx, r.id), 'Entry deleted') }}>Delete</Button>}</Td></tr>)}</Table></Card>
       {edit && <Modal title="Record labour" onClose={() => setEdit(null)}>
         <form className="space-y-3" onSubmit={async e => { e.preventDefault(); if (await run(() => recordLabour(ctx, edit as LabourInput), 'Labour recorded')) setEdit(null) }}>

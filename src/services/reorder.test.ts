@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeEach } from 'vitest'
 import { Db, MemoryPersistence } from '../db/database'
+import { SCHEMA_VERSION } from '../db/schema'
 import { initialiseFarm, login, createUser } from './setup'
 import { type Ctx, PermissionError } from './context'
 import { createInput, updateInput, listInputs, recordPurchase, recordAdjustment } from './inventory'
@@ -52,6 +53,6 @@ describe('reorder level', () => {
     const p = new MemoryPersistence(); p.data = db.exportBytes(); const up = await Db.open(p)
     expect(up.all<{ name: string }>(`PRAGMA table_info(inputs)`).map(c => c.name)).toContain('reorder_level')
     expect(up.all<{ name: string; reorder_level: number | null }>(`SELECT name, reorder_level FROM inputs`)).toEqual([{ name: 'Compound C', reorder_level: null }])
-    expect(up.get<{ value: string }>(`SELECT value FROM meta WHERE key='schema_version'`)!.value).toBe('13')
+    expect(up.get<{ value: string }>(`SELECT value FROM meta WHERE key='schema_version'`)!.value).toBe(String(SCHEMA_VERSION))
   })
 })
