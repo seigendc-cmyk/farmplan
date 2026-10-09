@@ -560,4 +560,26 @@ assert.equal((await db.query(`select row_sent('activity_log','${ta}','${ev16}') 
 assert.equal((await db.query(`select * from activity_log`)).rows.length,0)                                 // not even its own: the cloud keeps none readable to it
 await as(A); assert.ok((await db.query(`select * from activity_log`)).rows.some(r=>r.id===ev16))
 await db.exec(`reset role`)
+// ---- 0017: farm modules ----
+await db.exec(`reset role`)
+const grants17=(await db.query(`select count(*)::int n from role_permissions`)).rows[0].n
+await db.exec(readFileSync('supabase/migrations/0017_farm_modules.sql','utf8'))
+assert.equal((await db.query(`select count(*)::int n from role_permissions`)).rows[0].n, grants17)   // nothing back-filled
+assert.equal((await db.query(`select modules from farms where id='${farm}'`)).rows[0].modules,'tobacco')   // existing farms keep Tobacco
+const FM='00000000-0000-0000-0000-0000000000a8'
+await db.exec(`insert into auth.users values ('${FM}')`)
+await db.query(`insert into tenant_members(tenant_id,user_id,role_id) values ('${ta}','${FM}','${await role16('Farm editor',['settings.farm.view','settings.farm.manage'])}')`)
+await db.exec(`set role authenticated`)
+await as(FM)
+await db.query(`update farms set name='Farm A (renamed)' where id='${farm}'`)                              // may edit the farm itself
+await assert.rejects(()=>db.query(`update farms set modules='tobacco,orchards' where id='${farm}'`), /settings\.modules\.manage/)
+await assert.rejects(()=>db.query(`insert into farms(tenant_id,name,modules) values ('${ta}','Sneaky','livestock')`), /settings\.modules\.manage/)
+await as(A)
+await db.query(`update farms set modules='tobacco,orchards' where id='${farm}'`)                           // Owner may
+await assert.rejects(()=>db.query(`update farms set modules='Tobacco; drop' where id='${farm}'`), /farms_modules_format/)
+await assert.rejects(()=>db.query(`update farms set modules='' where id='${farm}'`), /farms_modules_format/)
+await as(B); assert.equal((await db.query(`update farms set modules='livestock' where id='${farm}' returning id`)).rows.length,0)   // another tenant cannot touch it
+await db.exec(`reset role`)
+assert.equal((await db.query(`select modules from farms where id='${farm}'`)).rows[0].modules,'tobacco,orchards')
+
 console.log('ALL MIGRATION TESTS PASSED')

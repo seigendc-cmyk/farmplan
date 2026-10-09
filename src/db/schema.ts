@@ -1,5 +1,5 @@
 // Local SQLite schema. Mirrors supabase/migrations/0001_foundation.sql so rows sync 1:1.
-export const SCHEMA_VERSION = 14
+export const SCHEMA_VERSION = 15
 
 const common = `
   created_at TEXT NOT NULL DEFAULT (datetime('now')),
@@ -25,7 +25,7 @@ CREATE TABLE IF NOT EXISTS local_users (
 
 CREATE TABLE IF NOT EXISTS farms (
   id TEXT PRIMARY KEY, tenant_id TEXT NOT NULL, name TEXT NOT NULL, location TEXT, total_area_ha REAL,
-  currency TEXT NOT NULL DEFAULT 'USD', ${common});
+  currency TEXT NOT NULL DEFAULT 'USD', modules TEXT NOT NULL DEFAULT 'tobacco', ${common});
 
 CREATE TABLE IF NOT EXISTS seasons (
   id TEXT PRIMARY KEY, tenant_id TEXT NOT NULL, farm_id TEXT NOT NULL REFERENCES farms(id),

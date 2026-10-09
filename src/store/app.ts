@@ -17,14 +17,21 @@ const readSession = (): string | null => {
     return s?.userId && s.at && Date.now() - s.at < SESSION_HOURS * 3600e3 ? s.userId : null } catch { return null }
 }
 
+/** Which module this person works in is a per-device convenience (like the folded sidebar), so it lives in localStorage and works without it. */
+const MODULE_KEY = 'fp.module'
+const readModule = (): string | undefined => { try { return localStorage.getItem(MODULE_KEY) ?? undefined } catch { return undefined } }
+const saveModule = (id: string) => { try { localStorage.setItem(MODULE_KEY, id) } catch { /* private mode */ } }
+
 type Phase = 'booting' | 'setup' | 'login' | 'ready' | 'error' | 'portal' | 'join'
 interface AppState {
-  phase: Phase; db: Db | null; ctx: Ctx | null; rev: number; error?: string; fieldMode: boolean
+  phase: Phase; db: Db | null; ctx: Ctx | null; rev: number; error?: string; fieldMode: boolean; module?: string
+  setModule(id: string): void
   boot(): Promise<void>; afterSetup(): void; signedIn(ctx: Omit<Ctx, 'db'>, resumed?: boolean): void; signOut(): void; bump(): void; openPortal(): void; openJoin(): void; leavePortal(): void; setFieldMode(on: boolean): void
 }
 
 export const useApp = create<AppState>((set, get) => ({
-  phase: 'booting', db: null, ctx: null, rev: 0, fieldMode: false,
+  phase: 'booting', db: null, ctx: null, rev: 0, fieldMode: false, module: readModule(),
+  setModule(id) { saveModule(id); set(s => ({ module: id, ctx: s.ctx ? { ...s.ctx, module: id } : s.ctx, rev: s.rev + 1 })) },
   async boot() {
     try {
       // The wasm is imported as a URL so the bundler ships exactly the file the installed sql.js asks for (newer sql.js versions use a different file name in browsers).
@@ -40,7 +47,7 @@ export const useApp = create<AppState>((set, get) => ({
     // A fresh sign-in opens the Dashboard; a reload stays on the page it was on.
     if (!resumed) try { if (window.location.hash && window.location.hash !== '#/') history.replaceState(null, '', '#/') } catch { /* no history API */ }
     if (c.actor) saveSession(c.actor.id)
-    set({ ctx: { db, ...c }, phase: 'ready', fieldMode: deviceTag(db) !== '' }) },
+    set({ ctx: { db, ...c, module: get().module }, phase: 'ready', fieldMode: deviceTag(db) !== '' }) },
   signOut() { clearSession(); const db = get().db; if (db) db.actor = null; set({ ctx: null, phase: 'login', fieldMode: false }) },
   openJoin() { set({ phase: 'join' }) },
   setFieldMode(on) { set({ fieldMode: on }) },

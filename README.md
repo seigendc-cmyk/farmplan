@@ -226,6 +226,17 @@ Design and decisions: `docs/CLOUD_DERIVED_ROWS_DESIGN.md`. A security change tha
 
 **Apply 0016 together with this app build.** Phones on an older build keep sending upserts, which stay refused (quarantined, as before) until they update; then **Retry** on Sync & backup resends them. Tests: the 0016 block in `tests/migration.test.mjs`; `src/services/sync.derived.test.ts` (an RLS-aware fake cloud).
 
+## Modules — the farm chooses what it farms (Platform Step 0, schema v15)
+| | |
+|---|---|
+| What | A farm lists the **modules** it uses (`farms.modules`, comma-separated ids from `src/modules/registry.ts`). Every existing farm keeps `tobacco`. Only Tobacco is available today; Horticulture, Orchards, Field crops, Tree nursery and Livestock appear on **Settings → Modules** as "coming soon" (disabled). |
+| Who | Permission `settings.modules.manage` (Owner via `*`; not granted to other roles, nothing back-filled). `setFarmModules` refuses an empty list, unknown or unavailable modules, and switching a module off while it has an active season. |
+| Module picker | Shown in the sidebar only when the signed-in person can use two or more enabled modules. The choice is per device (`localStorage` `fp.module`) and lives in `ctx.module`. The Tobacco menu groups (Production, Curing, Quality, Marketing, Contracts) show only in the Tobacco module; shared groups stay. |
+| Seasons | A module is identified by `seasons.enterprise`. **One active season per module** (before: one per farm): `createSeason`, `setSeasonStatus` and `activeSeason(ctx, module = currentModule(ctx))` only touch the module's own seasons. Shared tables are not tagged; a record's module comes from its season. |
+| Cloud | `0017_farm_modules.sql`: `farms.modules` with a format check and a trigger so only `settings.modules.manage` can change it (a farm editor can still rename the farm). Default role permissions unchanged. **Apply after every device runs v15.** |
+| Tests | `src/services/modules.test.ts`, `src/ui.modules.test.tsx`, the 0017 block in `tests/migration.test.mjs`. |
+| Not verified | Not looked at in a real browser; the picker with two modules is tested by setting the farm's modules in data, because no second module can be switched on yet. |
+
 ## Phase 8 — Wi-Fi hub (no internet)
 
 | Area | What you get |
@@ -259,7 +270,7 @@ npm run tauri build  # installers
 Data is stored in a local SQLite database (sql.js, persisted to IndexedDB inside the Tauri webview; Phase 2 moves persistence to a native file).
 
 ## Supabase
-Apply `supabase/migrations/0001_foundation.sql`, `0002_claim_tenant.sql`, `0003_curing_chain.sql`, `0004_grading_marketing.sql`, `0005_contracts.sql`, then `0006_sharing.sql`, `0007_field_devices.sql`, `0008_budgets.sql`, `0009_machinery.sql`, `0010_allocation.sql`, `0011_buyers.sql`, `0012_activity_log.sql`, `0013_brain_chat_perms.sql`, `0014_reorder_level.sql`, `0015_fuel_and_links.sql`, `0016_derived_rows_insert_only.sql` (SQL editor or `supabase db push`). Create a user (Auth), then in **Sync & backup** enter project URL, publishable key and credentials. The device claims its local tenant id via `claim_tenant`, pushes, then pulls.
+Apply `supabase/migrations/0001_foundation.sql`, `0002_claim_tenant.sql`, `0003_curing_chain.sql`, `0004_grading_marketing.sql`, `0005_contracts.sql`, then `0006_sharing.sql`, `0007_field_devices.sql`, `0008_budgets.sql`, `0009_machinery.sql`, `0010_allocation.sql`, `0011_buyers.sql`, `0012_activity_log.sql`, `0013_brain_chat_perms.sql`, `0014_reorder_level.sql`, `0015_fuel_and_links.sql`, `0016_derived_rows_insert_only.sql`, `0017_farm_modules.sql` (SQL editor or `supabase db push`). Create a user (Auth), then in **Sync & backup** enter project URL, publishable key and credentials. The device claims its local tenant id via `claim_tenant`, pushes, then pulls.
 
 ## Design rules
 - Everything is an event: purchases, applications, operations create linked ledger rows; costs are derived, never retyped.

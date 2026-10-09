@@ -75,6 +75,7 @@ export const PERMISSION_GROUPS: PermissionGroup[] = [
     { key: 'settings.farm.manage', label: 'Manage farm' },
     { key: 'settings.season.view', label: 'View seasons' },
     { key: 'settings.season.manage', label: 'Manage seasons' },
+    { key: 'settings.modules.manage', label: 'Switch farm modules on and off' },
     { key: 'settings.users.manage', label: 'Manage users' },
     { key: 'settings.roles.manage', label: 'Manage roles' },
     { key: 'settings.access.manage', label: 'Manage contractor / extension access' },

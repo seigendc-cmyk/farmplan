@@ -6,6 +6,9 @@ import { HashRouter, NavLink, Navigate, Route, Routes, useLocation } from 'react
 import { useApp } from './store/app'
 import { Toasts, Button } from './ui/kit'
 import { can } from './services/context'
+import { accessibleModules, currentModule } from './services/modules'
+import { moduleLabel } from './modules/registry'
+import Modules from './pages/Modules'
 import { Setup, Login } from './pages/Auth'
 import Dashboard from './pages/Dashboard'
 import Seasons from './pages/Seasons'
@@ -41,20 +44,21 @@ import SyncPage from './pages/Sync'
 
 /** `perm`: needed to see the item; `anyOf`: any one of these is enough. */
 interface NavItem { to?: string; label: string; perm?: string; anyOf?: string[] }
-const NAV: { group: string; items: NavItem[] }[] = [
+/** `module`: the group shows only while that module is the one being worked in; no `module` means shared by every module. */
+const NAV: { group: string; module?: string; items: NavItem[] }[] = [
   { group: '', items: [{ to: '/', label: 'Dashboard' }] },
-  { group: 'Production', items: [
+  { group: 'Production', module: 'tobacco', items: [
     { to: '/seedbeds', label: 'Seedbeds', perm: 'production.seedbed.view' }, { to: '/fields', label: 'Fields', perm: 'production.field.view' },
     { to: '/operations', label: 'Operations', perm: 'production.operation.view' },
     { to: '/transplanting', label: 'Transplanting', perm: 'production.transplant.view' }, { to: '/harvest', label: 'Harvest', perm: 'production.harvest.view' }] },
-  { group: 'Curing', items: [{ to: '/barns', label: 'Barns', perm: 'curing.barn.view' }, { to: '/curing', label: 'Curing cycles', perm: 'curing.cycle.view' }, { to: '/starking', label: 'Starking', perm: 'curing.storage.view' }] },
-  { group: 'Quality', items: [{ to: '/grading', label: 'Grading', perm: 'quality.grading.view' }, { to: '/bales', label: 'Bales', perm: 'quality.bale.view' }] },
-  { group: 'Marketing', items: [{ to: '/sales', label: 'Sales', perm: 'marketing.sale.view' }, { to: '/buyers', label: 'Buyers', perm: 'marketing.buyer.view' }] },
+  { group: 'Curing', module: 'tobacco', items: [{ to: '/barns', label: 'Barns', perm: 'curing.barn.view' }, { to: '/curing', label: 'Curing cycles', perm: 'curing.cycle.view' }, { to: '/starking', label: 'Starking', perm: 'curing.storage.view' }] },
+  { group: 'Quality', module: 'tobacco', items: [{ to: '/grading', label: 'Grading', perm: 'quality.grading.view' }, { to: '/bales', label: 'Bales', perm: 'quality.bale.view' }] },
+  { group: 'Marketing', module: 'tobacco', items: [{ to: '/sales', label: 'Sales', perm: 'marketing.sale.view' }, { to: '/buyers', label: 'Buyers', perm: 'marketing.buyer.view' }] },
   { group: 'Resources', items: [{ to: '/inventory', label: 'Inventory', perm: 'resources.inventory.view' }, { to: '/labour', label: 'Labour', perm: 'resources.labour.view' }, { to: '/machinery', label: 'Machinery', perm: 'resources.machinery.view' }] },
   { group: 'Finance', items: [{ to: '/costs', label: 'Costs', perm: 'finance.cost.view' }, { to: '/budgets', label: 'Budgets', perm: 'finance.budget.view' }, { to: '/profitability', label: 'Profitability', perm: 'finance.cost.view' }] },
-  { group: 'Contracts', items: [{ to: '/contracts', label: 'Programmes', perm: 'contracts.contract.view' }, { to: '/contractors', label: 'Contractors', perm: 'contracts.contract.view' }] },
+  { group: 'Contracts', module: 'tobacco', items: [{ to: '/contracts', label: 'Programmes', perm: 'contracts.contract.view' }, { to: '/contractors', label: 'Contractors', perm: 'contracts.contract.view' }] },
   { group: 'Brain', items: [{ to: '/activity', label: 'Activity' }, { to: '/ask', label: 'Ask', anyOf: ['brain.chat.ask', 'brain.chat.cloud'] }] },
-  { group: 'Settings', items: [{ to: '/seasons', label: 'Seasons', perm: 'settings.season.view' }, { to: '/access', label: 'Users & access' },
+  { group: 'Settings', items: [{ to: '/seasons', label: 'Seasons', perm: 'settings.season.view' }, { to: '/modules', label: 'Modules', perm: 'settings.modules.manage' }, { to: '/access', label: 'Users & access' },
     { to: '/sync', label: 'Sync & backup' }] },
 ]
 
@@ -113,6 +117,7 @@ function Shell() {
   if (fieldMode) return <FieldTerminal />
   const showMenu = () => { if (wide) { setFolded(false); saveFolded(false) } else setOpen(true) }
   const hideMenu = () => { refocusMenu.current = true; if (wide) { setFolded(true); saveFolded(true) } else setOpen(false) }
+  const mods = accessibleModules(ctx, p => can(ctx, p)); const cur = currentModule(ctx)
   const sync = syncLabel(pending, !!loadCloudConfig().url || deviceTag(db!) !== '')
   return (
     <HashRouter>
@@ -126,8 +131,13 @@ function Shell() {
             <button ref={closeBtn} type="button" onClick={hideMenu} aria-label={wide ? 'Hide menu' : 'Close menu'} title={wide ? 'Hide menu' : undefined}
               className="w-9 h-9 grid place-items-center rounded text-gray-600 hover:bg-gray-100 text-lg">{wide ? '«' : '×'}</button>
           </div>
+          {mods.length > 1 && <div className="px-4 py-2 border-b border-gray-200">
+            <label className="block text-[11px] uppercase tracking-wider text-gray-500 mb-1" htmlFor="module-picker">Module</label>
+            <select id="module-picker" value={cur} onChange={e => useApp.getState().setModule(e.target.value)} className="w-full rounded border border-gray-300 bg-white px-2 py-1.5 text-sm">
+              {mods.map(id => <option key={id} value={id}>{moduleLabel(id)}</option>)}</select>
+          </div>}
           <nav className="flex-1 overflow-y-auto py-2 text-sm" aria-label="Main">
-            {NAV.map(g => {
+            {NAV.filter(g => !g.module || g.module === cur).map(g => {
               const items = g.items.filter(i => (i.anyOf ? i.anyOf.some(p => can(ctx, p)) : !i.perm || can(ctx, i.perm)) || i.label === 'Users & access' || (i.to === '/activity' && canSeeAnyActivity(ctx)))
               if (!items.length) return null
               return (
@@ -182,6 +192,7 @@ function Shell() {
             <Route path="/ask" element={<Ask />} />
             <Route path="/costs" element={<Costs />} />
             <Route path="/seasons" element={<Seasons />} />
+            <Route path="/modules" element={<Modules />} />
             <Route path="/access" element={<Access />} />
             <Route path="/sync" element={<SyncPage />} />
             <Route path="*" element={<Navigate to="/" replace />} />

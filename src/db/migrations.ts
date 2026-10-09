@@ -8,6 +8,10 @@ import { PHASE10_GRANTS, PHASE11_GRANTS, PHASE12_GRANTS, PHASE2_GRANTS, PHASE3_G
 export function runMigrations(db: Db, from: number) {
   if (from < 9) hubReindex(db)
   db.tx(() => {
+    if (from < 15) {   // Modules: a farm lists the modules it uses; every existing farm keeps running Tobacco only. No permission grant: the Owner role holds '*'.
+      const cols = db.all<{ name: string }>(`PRAGMA table_info(farms)`).map(c => c.name)
+      if (cols.length && !cols.includes('modules')) db.run(`ALTER TABLE farms ADD COLUMN modules TEXT NOT NULL DEFAULT 'tobacco'`)
+    }
     if (from < 14) {   // Phase D: fuel drawn from stock by machine logs; labour entries and machine logs linked to the operation they belong to
       const add = (table: string, col: string, ddl: string) => { const cols = db.all<{ name: string }>(`PRAGMA table_info(${table})`).map(c => c.name); if (cols.length && !cols.includes(col)) db.run(`ALTER TABLE ${table} ADD COLUMN ${col} ${ddl}`) }
       add('machines', 'fuel_input_id', 'TEXT REFERENCES inputs(id)')

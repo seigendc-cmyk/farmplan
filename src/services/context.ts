@@ -14,6 +14,8 @@ export interface Ctx {
   farmId: string
   actor: { id: string; name: string } | null
   perms: ReadonlySet<string>
+  /** The module this person is working in (their picker choice). Absent means the farm's first enabled module, i.e. Tobacco on every existing farm. */
+  module?: string
 }
 
 export function can(ctx: Ctx, perm: string) { return hasPermission(ctx.perms, perm) }
