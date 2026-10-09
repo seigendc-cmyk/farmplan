@@ -622,4 +622,38 @@ assert.equal((await db.query(`select stage from projects where id='${prj}'`)).ro
 assert.equal((await db.query(`select count(*)::int n from projects where id='${prj2}'`)).rows[0].n,1)   // the season manager's insert landed
 assert.equal((await db.query(`select count(*)::int n from project_stage_history where project_id='${prj2}'`)).rows[0].n,1)
 
+// ---- 0019: plan figures, budget months, budget versions ----
+await db.exec(`reset role`)
+const grants19=(await db.query(`select count(*)::int n from role_permissions`)).rows[0].n
+await db.exec(readFileSync('supabase/migrations/0019_budget_versions.sql','utf8'))
+await db.exec(`grant all on all tables in schema public to authenticated; grant execute on all functions in schema public to authenticated;`)
+assert.equal((await db.query(`select count(*)::int n from role_permissions`)).rows[0].n, grants19)   // nothing back-filled: finance.budget.approve stays with the Owner
+const s19=(await db.query(`insert into seasons(tenant_id,farm_id,label,starts_on,ends_on) values ('${ta}','${farm}','2030/31','2030-09-01','2031-08-31') returning id`)).rows[0].id
+const s19b=(await db.query(`insert into seasons(tenant_id,farm_id,label,starts_on,ends_on) values ('${ta}','${farm}','2031/32','2031-09-01','2032-08-31') returning id`)).rows[0].id
+await db.query(`update projects set plan_ha=2, plan_yield_kg_ha=2000, plan_price_kg=3 where id='${prj}'`)
+await assert.rejects(()=>db.query(`update projects set plan_ha=0 where id='${prj}'`), /projects_plan_ha_pos/)
+await assert.rejects(()=>db.query(`update projects set plan_price_kg=-1 where id='${prj}'`), /projects_plan_price_nonneg/)
+await db.query(`insert into budgets(tenant_id,farm_id,season_id,category,amount,expected_month) values ('${ta}','${farm}','${s19}','seed',1000,'2030-10')`)
+await assert.rejects(()=>db.query(`insert into budgets(tenant_id,farm_id,season_id,category,amount,expected_month) values ('${ta}','${farm}','${s19}','labour',10,'2030-13')`), /budgets_expected_month_fmt/)
+const bv=(sid,no,kind)=>{ const id=crypto.randomUUID(); return [id,`insert into budget_versions(id,tenant_id,farm_id,season_id,version_no,kind,approved_on) values ('${id}','${ta}','${farm}','${sid}',${no},'${kind}','2030-09-02')`] }
+const line=(v,amt=1000)=>`insert into budget_version_lines(tenant_id,version_id,category,amount,expected_month) values ('${ta}','${v}','seed',${amt},'2030-10')`
+await db.exec(`set role authenticated`)
+await as(M)   // Farm Manager: may edit budgets, may not approve
+const [b1,b1sql]=bv(s19,1,'baseline'); await assert.rejects(()=>db.query(b1sql), RLS)
+await as(A); await db.query(b1sql); await db.query(line(b1))                                              // Owner approves the baseline
+await assert.rejects(()=>db.query(bv(s19,1,'revision')[1]), /check|duplicate/)                            // kind must match version number
+await as(M)
+const [b2,b2sql]=bv(s19,2,'revision'); await db.query(b2sql); await db.query(line(b2,1200))                // a revision is an edit
+assert.equal((await db.query(`select * from budget_versions where season_id='${s19}'`)).rows.length,2)
+assert.equal((await db.query(`update budget_versions set reason='tampered' where id='${b1}' returning id`)).rows.length,0)   // the baseline cannot be edited by an editor
+assert.equal((await db.query(`update budget_version_lines set amount=1 where version_id='${b1}' returning id`)).rows.length,0)
+await assert.rejects(()=>db.query(line(b1,5)), RLS)                                                       // nor can lines be added to it
+await assert.rejects(()=>db.query(bv(s19b,1,'baseline')[1]), RLS)
+await as(D); assert.equal((await db.query(`select * from budget_versions`)).rows.length,0); assert.equal((await db.query(`select * from budget_version_lines`)).rows.length,0)   // Field Recorder: no budget access
+await assert.rejects(()=>db.query(bv(s19b,2,'revision')[1]), RLS)
+await as(B); assert.equal((await db.query(`select * from budget_versions`)).rows.length,0)
+await assert.rejects(()=>db.query(`insert into budget_versions(tenant_id,farm_id,season_id,version_no,kind,approved_on) values ('${tb}','${fb}','${s19}',1,'baseline','2030-09-02')`))   // composite FK: another tenant's season
+await db.exec(`reset role`)
+assert.equal((await db.query(`select count(*)::int n from budget_version_lines`)).rows[0].n,2)
+
 console.log('ALL MIGRATION TESTS PASSED')

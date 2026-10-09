@@ -2,7 +2,8 @@ import { useState } from 'react'
 import { stagesOf } from '../modules/stages'
 import { advanceProject, backProject, editProjectNotes, listProjects, projectHistory, type ProjectRow } from '../services/projects'
 import { useCan, useCtx, useData, useRun, fmt } from '../ui/hooks'
-import { Badge, Button, Card, Denied, Label, Modal, PageHeader, Table, Td, Textarea } from '../ui/kit'
+import { Badge, Button, Card, Denied, Grid, Label, Modal, NumberInput, PageHeader, Stat, Table, Td, Textarea } from '../ui/kit'
+import { planSummary, setPlan } from '../services/budgetplan'
 
 export default function Pipeline() {
   const ctx = useCtx(); const can = useCan(); const run = useRun()
@@ -23,17 +24,21 @@ export default function Pipeline() {
       </Table></Card>
       {open && <ProjectModal p={open} onClose={() => setOpenId(null)} canAdvance={can('projects.stage.advance')} canOverride={can('projects.stage.override')} canEdit={can('projects.project.edit')}
         advance={(o) => run(() => advanceProject(ctx, open.id, o), 'Project moved')} back={(r) => run(() => backProject(ctx, open.id, r), 'Project moved back')}
-        saveNotes={(n) => run(() => editProjectNotes(ctx, open.id, n), 'Notes saved')} />}
+        saveNotes={(n) => run(() => editProjectNotes(ctx, open.id, n), 'Notes saved')}
+        savePlan={(i) => run(() => setPlan(ctx, open.id, i), 'Plan saved')} />}
     </>
   )
 }
 
 const nextText = (p: ProjectRow) => p.next === null ? 'Finished' : p.unmet.length ? p.unmet.join('; ') : 'Ready to move on'
 
-function ProjectModal({ p, onClose, canAdvance, canOverride, canEdit, advance, back, saveNotes }: {
+function ProjectModal({ p, onClose, canAdvance, canOverride, canEdit, advance, back, saveNotes, savePlan }: {
   p: ProjectRow; onClose: () => void; canAdvance: boolean; canOverride: boolean; canEdit: boolean
-  advance: (o: { to?: string; override?: boolean; reason?: string }) => Promise<unknown>; back: (reason: string) => Promise<unknown>; saveNotes: (n: string) => Promise<unknown>
+  advance: (o: { to?: string; override?: boolean; reason?: string }) => Promise<unknown>; back: (reason: string) => Promise<unknown>; saveNotes: (n: string) => Promise<unknown>; savePlan: (i: { plan_ha: number | null; plan_yield_kg_ha: number | null; plan_price_kg: number | null }) => Promise<unknown>
 }) {
+  const cur = useData(c => c.db.get<{ currency: string }>(`SELECT currency FROM farms WHERE id=?`, [c.farmId])?.currency) ?? 'USD'
+  const sum = useData(c => planSummary(c, p.id), [p.id, p.plan_ha, p.plan_yield_kg_ha, p.plan_price_kg])
+  const [pl, setPl] = useState({ ha: p.plan_ha ?? undefined, y: p.plan_yield_kg_ha ?? undefined, price: p.plan_price_kg ?? undefined })
   const history = useData(c => projectHistory(c, p.id), [p.id, p.stage]) ?? []
   const stages = stagesOf(p.module); const idx = stages.findIndex(s => s.id === p.stage)
   const [reason, setReason] = useState(''); const [notes, setNotes] = useState(p.notes ?? '')
@@ -55,6 +60,20 @@ function ProjectModal({ p, onClose, canAdvance, canOverride, canEdit, advance, b
           {idx > 0 && <Button onClick={() => { if (!reason.trim()) { void back(''); return } void back(reason).then(() => setReason('')) }}>{`Back to ${label(stages[idx - 1].id)}`}</Button>}
         </div>
         {idx > 0 && !blocked && !p.skip_to && <p className="text-xs text-gray-500">Going back needs a reason.</p>}
+      </div>}
+      <h3 className="text-sm font-semibold mt-3 mb-1">Plan</h3>
+      <Grid cols={3}>
+        <Label text="Planned hectares"><NumberInput step="any" min={0} value={pl.ha} onChange={n => setPl({ ...pl, ha: n })} disabled={!canEdit} /></Label>
+        <Label text="Expected yield (kg per ha)"><NumberInput step="any" min={0} value={pl.y} onChange={n => setPl({ ...pl, y: n })} disabled={!canEdit} /></Label>
+        <Label text={`Expected price (${cur} per kg)`}><NumberInput step="any" min={0} value={pl.price} onChange={n => setPl({ ...pl, price: n })} disabled={!canEdit} /></Label>
+      </Grid>
+      {canEdit && <div className="mt-2"><Button small onClick={() => void savePlan({ plan_ha: pl.ha ?? null, plan_yield_kg_ha: pl.y ?? null, plan_price_kg: pl.price ?? null })}>Save plan</Button></div>}
+      {sum && <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 mt-3" aria-label="Plan summary">
+        <Stat label="Expected crop" value={sum.expected_kg == null ? '—' : `${fmt.num(sum.expected_kg)} kg`} />
+        <Stat label="Budget" value={fmt.money(sum.budget_total, cur)} sub={sum.cost_per_ha == null ? undefined : `${fmt.money(sum.cost_per_ha, cur)} per ha`} />
+        <Stat label="Break-even price" value={sum.break_even_kg_price == null ? '—' : `${fmt.money(sum.break_even_kg_price, cur)} / kg`} />
+        <Stat label="Expected revenue" value={sum.revenue == null ? '—' : fmt.money(sum.revenue, cur)} />
+        <Stat label="Expected margin" value={sum.margin == null ? '—' : fmt.money(sum.margin, cur)} />
       </div>}
       <Label text="Notes"><Textarea value={notes} onChange={e => setNotes(e.target.value)} disabled={!canEdit} /></Label>
       {canEdit && <div className="mt-2"><Button small onClick={() => void saveNotes(notes)} disabled={notes === (p.notes ?? '')}>Save notes</Button></div>}

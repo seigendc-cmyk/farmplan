@@ -74,7 +74,7 @@ describe('existing data', () => {
     const s = createSeason(o, { label: '2026/27', starts_on: '2026-09-01', ends_on: '2027-08-31', activate: true })
     db.run(`ALTER TABLE farms DROP COLUMN modules`); db.run(`UPDATE meta SET value='14' WHERE key='schema_version'`)
     const p = new MemoryPersistence(); p.data = db.exportBytes(); const up = await Db.open(p); const u = { ...o, db: up }
-    expect(up.get<{ value: string }>(`SELECT value FROM meta WHERE key='schema_version'`)!.value).toBe('16')
+    expect(up.get<{ value: string }>(`SELECT value FROM meta WHERE key='schema_version'`)!.value).toBe('17')
     expect(up.all<{ name: string }>(`PRAGMA table_info(farms)`).map(c => c.name)).toContain('modules')
     expect(enabledModules(u)).toEqual(['tobacco']); expect(activeSeason(u)?.id).toBe(s)
   })

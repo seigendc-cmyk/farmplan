@@ -7,6 +7,7 @@ import { stagesOf, stageLabel } from '../modules/stages'
 export interface ProjectRow {
   id: string; season_id: string; season: string; module: string; name: string; season_status: string
   stage: string; stage_label: string; notes: string | null; since: string | null
+  plan_ha: number | null; plan_yield_kg_ha: number | null; plan_price_kg: number | null
   /** The stage a plain "advance" goes to, and the one after it when the next stage is optional. */
   next: string | null; skip_to: string | null
   /** What is still missing before the project may leave its current stage. */
@@ -16,11 +17,13 @@ export interface HistoryRow { id: string; from_stage: string | null; to_stage: s
 
 /**
  * Requirements to leave a stage, read from the records that already exist for the season. Stages without an entry have none yet:
- * Planning, Funding and Contracted get theirs with the planning, budgeting and funding steps. An owner can override any of them (the reason is logged).
+ * Funding and Contracted get theirs with the funding step. An owner can override any of them (the reason is logged).
  */
-const LEAVE: Record<string, Record<string, (db: Db, p: { season_id: string; season_status: string }) => string | null>> = {
+type Gate = { season_id: string; season_status: string; plan_ha: number | null; plan_yield_kg_ha: number | null }
+const LEAVE: Record<string, Record<string, (db: Db, p: Gate) => string | null>> = {
   tobacco: {
-    budget: (db, p) => has(db, 'budgets', p.season_id) ? null : 'Set at least one budget line for the season',
+    planning: (_db, p) => p.plan_ha && p.plan_yield_kg_ha ? null : 'Enter the planned hectares and expected yield',
+    budget: (db, p) => has(db, 'budget_versions', p.season_id) ? null : 'Approve the budget as the baseline',
     land_seedbed: (db, p) => has(db, 'seedbeds', p.season_id) ? null : 'Record at least one seedbed',
     growing: (db, p) => has(db, 'transplants', p.season_id) ? null : 'Record transplanting',
     harvest_curing: (db, p) => has(db, 'harvest_batches', p.season_id) ? null : 'Record at least one harvest batch',
@@ -29,12 +32,12 @@ const LEAVE: Record<string, Record<string, (db: Db, p: { season_id: string; seas
 }
 const has = (db: Db, table: string, seasonId: string) => !!db.get(`SELECT 1 FROM ${table} WHERE season_id=? AND deleted_at IS NULL LIMIT 1`, [seasonId])
 
-export function unmetRequirements(db: Db, module: string, stage: string, p: { season_id: string; season_status: string }): string[] {
+export function unmetRequirements(db: Db, module: string, stage: string, p: Gate): string[] {
   const rule = LEAVE[module]?.[stage]; const m = rule?.(db, p); return m ? [m] : []
 }
 
-interface Raw { id: string; season_id: string; stage: string; notes: string | null; label: string; enterprise: string; season_status: string; since: string | null }
-const BASE = `SELECT p.id, p.season_id, p.stage, p.notes, s.label, s.enterprise, s.status AS season_status,
+interface Raw { id: string; season_id: string; stage: string; notes: string | null; plan_ha: number | null; plan_yield_kg_ha: number | null; plan_price_kg: number | null; label: string; enterprise: string; season_status: string; since: string | null }
+const BASE = `SELECT p.id, p.season_id, p.stage, p.notes, p.plan_ha, p.plan_yield_kg_ha, p.plan_price_kg, s.label, s.enterprise, s.status AS season_status,
   (SELECT MAX(h.changed_on) FROM project_stage_history h WHERE h.project_id=p.id AND h.deleted_at IS NULL) AS since
   FROM projects p JOIN seasons s ON s.id=p.season_id AND s.deleted_at IS NULL WHERE p.farm_id=? AND p.deleted_at IS NULL`
 
@@ -42,7 +45,7 @@ function shape(db: Db, r: Raw): ProjectRow {
   const stages = stagesOf(r.enterprise); const i = stages.findIndex(s => s.id === r.stage)
   const next = i >= 0 ? stages[i + 1] : undefined
   return { id: r.id, season_id: r.season_id, season: r.label, module: r.enterprise, name: `${moduleLabel(r.enterprise)} ${r.label}`, season_status: r.season_status,
-    stage: r.stage, stage_label: stageLabel(r.enterprise, r.stage), notes: r.notes, since: r.since, next: next?.id ?? null,
+    stage: r.stage, stage_label: stageLabel(r.enterprise, r.stage), notes: r.notes, since: r.since, plan_ha: r.plan_ha, plan_yield_kg_ha: r.plan_yield_kg_ha, plan_price_kg: r.plan_price_kg, next: next?.id ?? null,
     skip_to: next?.optional ? stages[i + 2]?.id ?? null : null, unmet: next ? unmetRequirements(db, r.enterprise, r.stage, r) : [] }
 }
 

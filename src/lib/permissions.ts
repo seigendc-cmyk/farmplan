@@ -69,6 +69,7 @@ export const PERMISSION_GROUPS: PermissionGroup[] = [
     { key: 'finance.cost.edit', label: 'Edit financial records' },
     { key: 'finance.budget.view', label: 'View budgets' },
     { key: 'finance.budget.edit', label: 'Set season budgets' },
+    { key: 'finance.budget.approve', label: 'Approve the baseline budget (Owner unless granted)' },
   ]},
   { menu: 'Projects', items: [
     { key: 'projects.project.view', label: 'View the project pipeline' },

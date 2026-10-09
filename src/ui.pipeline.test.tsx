@@ -34,13 +34,15 @@ describe('Pipeline UI', () => {
     within(row).getByText('Idea'); within(row).getByText('Ready to move on')
     await u.click(within(row).getByRole('button', { name: 'Open Tobacco 2026/27' })); const dlg = await screen.findByRole('dialog', { name: 'Tobacco 2026/27' })
     expect(within(dlg).getByLabelText('Stages').querySelector('[aria-current="step"]')!.textContent).toBe('Idea')
-    await u.click(within(dlg).getByRole('button', { name: 'Move to Planning' })); await within(dlg).findByRole('button', { name: 'Move to Budget' })
+    await u.click(within(dlg).getByRole('button', { name: 'Move to Planning' })); await within(dlg).findByText(/Before leaving Planning:/)
     expect(listProjects(useApp.getState().ctx!)[0].stage).toBe('planning'); within(dlg).getByText(/Idea → Planning/)
-    await u.click(within(dlg).getByRole('button', { name: 'Move to Budget' }))
-    await within(dlg).findByText(/Before leaving Budget:/); within(dlg).getByText(/Set at least one budget line/)
+    await u.click(within(dlg).getByRole('button', { name: 'Override and move to Budget' })); expect((await screen.findAllByText(/Say why you are moving past/)).length).toBeGreaterThan(0)   // an unmet plan needs a reason
+    useApp.getState().ctx!.db.run(`UPDATE projects SET plan_ha=2, plan_yield_kg_ha=2000`); useApp.getState().bump()
+    await u.click(await within(dlg).findByRole('button', { name: 'Move to Budget' }))
+    await within(dlg).findByText(/Before leaving Budget:/); within(dlg).getByText(/Approve the budget as the baseline/)
     expect(within(dlg).queryByRole('button', { name: 'Move to Funding' })).toBeNull()                       // blocked: no plain advance
     await u.click(within(dlg).getByRole('button', { name: 'Override and move to Funding' }))                // no reason yet
-    await screen.findByText(/Say why you are moving past an unmet requirement/); expect(getProject(useApp.getState().ctx!, listProjects(ctx)[0].id).stage).toBe('budget')
+    expect((await screen.findAllByText(/Say why you are moving past an unmet requirement/)).length).toBeGreaterThan(0); expect(getProject(useApp.getState().ctx!, listProjects(ctx)[0].id).stage).toBe('budget')
     await u.type(within(dlg).getByLabelText(/Reason/), 'Budget agreed on paper'); await u.click(within(dlg).getByRole('button', { name: 'Override and move to Funding' }))
     await within(dlg).findByText('override'); within(dlg).getByText(/Budget agreed on paper/); expect(listProjects(useApp.getState().ctx!)[0].stage).toBe('funding')
     within(dlg).getByRole('button', { name: 'Skip Contracted — go to Land and seedbed' })

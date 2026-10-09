@@ -167,7 +167,7 @@ describe('upgrading a Phase 1 database', () => {
     const perms = up.all<{ permission: string; role_id: string }>(`SELECT role_id, permission FROM role_permissions`)
     expect(perms.filter(x => x.role_id === 'r1').map(x => x.permission)).toContain('curing.cycle.close')
     expect(perms.filter(x => x.role_id === 'r2')).toHaveLength(0)
-    expect(up.get<{ value: string }>(`SELECT value FROM meta WHERE key='schema_version'`)!.value).toBe('16')
+    expect(up.get<{ value: string }>(`SELECT value FROM meta WHERE key='schema_version'`)!.value).toBe('17')
     const again = new MemoryPersistence(); again.data = up.exportBytes(); const reopened = await Db.open(again)
     expect(reopened.all(`SELECT 1 FROM role_permissions WHERE role_id='r1'`).length).toBe(perms.filter(x => x.role_id === 'r1').length) // idempotent
   })

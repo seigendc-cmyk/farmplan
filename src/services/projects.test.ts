@@ -6,10 +6,12 @@ import { createRole } from './roles'
 import { createSeason, setSeasonStatus } from './seasons'
 import { advanceProject, backProject, editProjectNotes, getProject, listProjects, projectHistory, projectOfSeason } from './projects'
 import { stagesOf } from '../modules/stages'
+import { approveBaseline } from './budgetplan'
 
 let db: Db; let o: Ctx; let season: string; let pid: string
 const ins = (t: string, r: Record<string, string | number | null>) => db.insert(t, { tenant_id: o.tenantId, farm_id: o.farmId, ...r })
 const stage = () => getProject(o, pid).stage
+const plan = () => db.run(`UPDATE projects SET plan_ha=2, plan_yield_kg_ha=2000 WHERE id=?`, [pid])
 beforeEach(async () => {
   db = await Db.open(new MemoryPersistence())
   await initialiseFarm(db, { tenantName: 'T', farmName: 'F', ownerName: 'Lovemore', ownerPin: '1234' })
@@ -33,14 +35,16 @@ describe('creating projects', () => {
 
 describe('moving between stages', () => {
   it('advances one stage at a time and records who, when and the new stage', () => {
-    advanceProject(o, pid); expect(stage()).toBe('planning'); advanceProject(o, pid, { reason: 'Plan agreed' }); expect(stage()).toBe('budget')
+    advanceProject(o, pid); expect(stage()).toBe('planning'); plan(); advanceProject(o, pid, { reason: 'Plan agreed' }); expect(stage()).toBe('budget')
     const h = projectHistory(o, pid); expect(h.map(x => x.to_stage)).toEqual(['idea', 'planning', 'budget']); expect(h[2]).toMatchObject({ kind: 'advance', from_stage: 'planning', reason: 'Plan agreed', actor_name: 'Lovemore' })
   })
-  it('will not leave Budget until the season has a budget line, then will', () => {
-    advanceProject(o, pid); advanceProject(o, pid)
-    expect(getProject(o, pid).unmet).toEqual(['Set at least one budget line for the season'])
-    expect(() => advanceProject(o, pid)).toThrow(/Not ready to leave Budget: Set at least one budget line/); expect(stage()).toBe('budget')
-    ins('budgets', { season_id: season, category: 'seed', amount: 100 }); expect(getProject(o, pid).unmet).toEqual([]); advanceProject(o, pid); expect(stage()).toBe('funding')
+  it('will not leave Planning until hectares and yield are set, nor Budget until a baseline is approved', () => {
+    advanceProject(o, pid); expect(getProject(o, pid).unmet).toEqual(['Enter the planned hectares and expected yield']); expect(() => advanceProject(o, pid)).toThrow(/Not ready to leave Planning/)
+    plan(); advanceProject(o, pid); expect(stage()).toBe('budget')
+    expect(getProject(o, pid).unmet).toEqual(['Approve the budget as the baseline'])
+    expect(() => advanceProject(o, pid)).toThrow(/Not ready to leave Budget: Approve the budget as the baseline/); expect(stage()).toBe('budget')
+    ins('budgets', { season_id: season, category: 'seed', amount: 100 }); expect(getProject(o, pid).unmet).toHaveLength(1)   // a budget line alone is not an approved baseline
+    approveBaseline(o, season); expect(getProject(o, pid).unmet).toEqual([]); advanceProject(o, pid); expect(stage()).toBe('funding')
   })
   it('Contracted can be skipped, and the skip is written in the history', () => {
     db.run(`UPDATE projects SET stage='funding' WHERE id=?`, [pid]); expect(getProject(o, pid).skip_to).toBe('land_seedbed')
@@ -80,7 +84,7 @@ describe('going back and overriding', () => {
     expect(() => advanceProject(mgr, pid)).toThrow(/Not ready/); expect(() => advanceProject(mgr, pid, { override: true, reason: 'x' })).toThrow(PermissionError)
     expect(() => advanceProject(o, pid, { override: true })).toThrow(/Say why/)
     advanceProject(o, pid, { override: true, reason: 'Budget agreed on paper' }); expect(stage()).toBe('funding')
-    const h = projectHistory(o, pid).at(-1)!; expect(h.kind).toBe('override'); expect(h.reason).toContain('Budget agreed on paper'); expect(h.reason).toContain('Set at least one budget line')
+    const h = projectHistory(o, pid).at(-1)!; expect(h.kind).toBe('override'); expect(h.reason).toContain('Budget agreed on paper'); expect(h.reason).toContain('Approve the budget as the baseline')
     const ev = db.all<{ summary: string; verb: string }>(`SELECT summary, verb FROM activity_log WHERE verb='project.override'`); expect(ev).toHaveLength(1); expect(ev[0].summary).toMatch(/Moved past an unmet requirement: Tobacco 2026\/27 from Budget to Funding — .*Budget agreed on paper/)
   })
   it('an ordinary move writes an activity event with no money in it', () => {
@@ -122,7 +126,7 @@ describe('existing data', () => {
     expect(by).toEqual({ '2026/27': 'planning', Grow: 'growing', Sold: 'grading_marketing', Done: 'closed', Budgeted: 'budget' })
     expect(projectHistory(u, listProjects(u)[0].id)[0]).toMatchObject({ kind: 'create' })
     expect(up.all(`SELECT * FROM cost_entries`)).toHaveLength(before)
-    expect(up.get<{ value: string }>(`SELECT value FROM meta WHERE key='schema_version'`)!.value).toBe('16')
+    expect(up.get<{ value: string }>(`SELECT value FROM meta WHERE key='schema_version'`)!.value).toBe('17')
     expect(up.all(`SELECT 1 FROM role_permissions rp JOIN roles r ON r.id=rp.role_id WHERE r.name='Farm Manager' AND rp.permission='projects.stage.advance'`)).toHaveLength(1)
     const again = up.all(`SELECT 1 FROM projects`).length; const { backfillProjects } = await import('../db/projectlink'); backfillProjects(up); expect(up.all(`SELECT 1 FROM projects`)).toHaveLength(again)   // running it twice adds nothing
   })

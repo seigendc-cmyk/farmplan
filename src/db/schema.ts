@@ -1,5 +1,5 @@
 // Local SQLite schema. Mirrors supabase/migrations/0001_foundation.sql so rows sync 1:1.
-export const SCHEMA_VERSION = 16
+export const SCHEMA_VERSION = 17
 
 const common = `
   created_at TEXT NOT NULL DEFAULT (datetime('now')),
@@ -259,18 +259,29 @@ CREATE INDEX IF NOT EXISTS ix_labour_season ON labour_entries(season_id) WHERE d
 CREATE TABLE IF NOT EXISTS budgets (
   id TEXT PRIMARY KEY, tenant_id TEXT NOT NULL, farm_id TEXT NOT NULL REFERENCES farms(id), season_id TEXT NOT NULL REFERENCES seasons(id),
   category TEXT NOT NULL CHECK (category IN ('seed','fertilizer','chemicals','labour','machinery','fuel','irrigation','transport','curing','storage','grading','baling','marketing','overhead')),
-  amount REAL NOT NULL CHECK (amount >= 0), notes TEXT, ${common});
+  amount REAL NOT NULL CHECK (amount >= 0), notes TEXT, expected_month TEXT CHECK (expected_month IS NULL OR expected_month GLOB '[0-9][0-9][0-9][0-9]-[0-1][0-9]'), ${common});
 CREATE UNIQUE INDEX IF NOT EXISTS ux_budget_cat ON budgets(season_id, category) WHERE deleted_at IS NULL;
 
 -- ---- Platform step 1: the project pipeline. One project per season (module = the season's enterprise); stage changes are kept as history. ----
 CREATE TABLE IF NOT EXISTS projects (
   id TEXT PRIMARY KEY, tenant_id TEXT NOT NULL, farm_id TEXT NOT NULL REFERENCES farms(id),
-  season_id TEXT NOT NULL REFERENCES seasons(id), stage TEXT NOT NULL, notes TEXT, ${common});
+  season_id TEXT NOT NULL REFERENCES seasons(id), stage TEXT NOT NULL, notes TEXT,
+  plan_ha REAL CHECK (plan_ha IS NULL OR plan_ha > 0), plan_yield_kg_ha REAL CHECK (plan_yield_kg_ha IS NULL OR plan_yield_kg_ha > 0), plan_price_kg REAL CHECK (plan_price_kg IS NULL OR plan_price_kg >= 0), ${common});
 CREATE UNIQUE INDEX IF NOT EXISTS ux_project_season ON projects(season_id) WHERE deleted_at IS NULL;
 CREATE TABLE IF NOT EXISTS project_stage_history (
   id TEXT PRIMARY KEY, tenant_id TEXT NOT NULL, project_id TEXT NOT NULL REFERENCES projects(id), from_stage TEXT, to_stage TEXT NOT NULL,
   kind TEXT NOT NULL CHECK (kind IN ('create','advance','back','override')), reason TEXT, changed_on TEXT NOT NULL, actor_name TEXT, ${common});
 CREATE INDEX IF NOT EXISTS ix_stage_history_project ON project_stage_history(project_id);
+
+-- ---- Platform step 2: budget versions. A version is an immutable snapshot of the season's budget lines; version 1 is the approved baseline. ----
+CREATE TABLE IF NOT EXISTS budget_versions (
+  id TEXT PRIMARY KEY, tenant_id TEXT NOT NULL, farm_id TEXT NOT NULL REFERENCES farms(id), season_id TEXT NOT NULL REFERENCES seasons(id),
+  version_no INTEGER NOT NULL CHECK (version_no >= 1), kind TEXT NOT NULL CHECK (kind IN ('baseline','revision')), reason TEXT, approved_on TEXT NOT NULL, approved_by TEXT, ${common},
+  UNIQUE (tenant_id, season_id, version_no));
+CREATE TABLE IF NOT EXISTS budget_version_lines (
+  id TEXT PRIMARY KEY, tenant_id TEXT NOT NULL, version_id TEXT NOT NULL REFERENCES budget_versions(id), category TEXT NOT NULL,
+  amount REAL NOT NULL CHECK (amount >= 0), expected_month TEXT, ${common});
+CREATE INDEX IF NOT EXISTS ix_bvl_version ON budget_version_lines(version_id);
 
 -- Read-only BI layer: the only objects natural-language questions may touch. No users, PINs, outbox or audit data.
 DROP VIEW IF EXISTS bi_seasons; CREATE VIEW bi_seasons AS SELECT label AS season, starts_on, ends_on, status FROM seasons WHERE deleted_at IS NULL;

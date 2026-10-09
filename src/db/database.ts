@@ -48,7 +48,7 @@ export const SYNC_ORDER = [
   'farms','seasons','projects','project_stage_history','blocks','fields','inputs','inventory_transactions',
   'seedbeds','operations','operation_inputs','transplants','harvest_batches','barns','curing_cycles',
   'curing_cycle_checks','cycle_batches','curing_logs','storage_units','contractors','contracts','contract_fields','contract_advances','contract_obligations','contract_settlements','grades','grading_lots','grading_outputs','bales',
-  'buyers','buyer_deductions','sales','sale_lines','sale_deductions','sale_payments','labour_entries','budgets','machines','machine_logs','allocation_rules','cost_entries','weather_records','activity_log',
+  'buyers','buyer_deductions','sales','sale_lines','sale_deductions','sale_payments','labour_entries','budgets','budget_versions','budget_version_lines','machines','machine_logs','allocation_rules','cost_entries','weather_records','activity_log',
 ] as const
 /** Identity tables (tenants, roles, permissions) are owned by the cloud and are not synced from devices. */
 export const SYNC_TABLES = new Set<string>(SYNC_ORDER)
