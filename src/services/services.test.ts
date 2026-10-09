@@ -129,7 +129,7 @@ describe('seedbeds', () => {
 describe('sync journal & persistence', () => {
   it('journals every write and survives export/reload', async () => {
     createField(owner, { field_no: 'F9', area_ha: 1 })
-    expect(db.get<{ n: number }>(`SELECT COUNT(*) n FROM outbox WHERE synced_at IS NULL AND table_name<>'activity_log'`)!.n).toBe(3) // farm + season + field
+    expect(db.get<{ n: number }>(`SELECT COUNT(*) n FROM outbox WHERE synced_at IS NULL AND table_name<>'activity_log'`)!.n).toBe(5) // farm + season + its project + the project's first history row + field
     expect(db.get<{ n: number }>(`SELECT COUNT(*) n FROM outbox WHERE synced_at IS NULL AND table_name='activity_log'`)!.n).toBeGreaterThanOrEqual(3) // each save also leaves a readable event
     const p = new MemoryPersistence(); p.data = db.exportBytes()
     const db2 = await Db.open(p)

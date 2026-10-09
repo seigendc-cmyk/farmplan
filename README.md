@@ -237,6 +237,19 @@ Design and decisions: `docs/CLOUD_DERIVED_ROWS_DESIGN.md`. A security change tha
 | Tests | `src/services/modules.test.ts`, `src/ui.modules.test.tsx`, the 0017 block in `tests/migration.test.mjs`. |
 | Not verified | Not looked at in a real browser; the picker with two modules is tested by setting the farm's modules in data, because no second module can be switched on yet. |
 
+## Project pipeline — every season is a project (Platform Step 1, schema v16)
+| | |
+|---|---|
+| What | Each season has one **project** (`projects`, the module is the season's enterprise) that moves through ordered stages kept as data in `src/modules/stages.ts`. Tobacco: Idea → Planning → Budget → Funding → Contracted (optional) → Land and seedbed → Growing → Harvest and curing → Grading and marketing → Closed. A module with no stage list has no pipeline yet. |
+| Screen | **Pipeline** (sidebar, `projects.project.view`): every project with its stage, since when, and the next step. **Open** shows the stage bar, what is still missing, move / skip / back buttons, notes and the full history. |
+| Rules | A stage can be left only when its requirement is met: Budget needs a budget line, Land and seedbed a seedbed, Growing a transplant, Harvest and curing a harvest batch, Grading and marketing a sale **and** a closed season. Planning, Funding and Contracted have none yet; they arrive with planning, budgeting and funding (Steps 2–3). Only Contracted can be skipped. Moving past an unmet requirement needs `projects.stage.override` (Owner only) and a reason; going back one stage needs a reason. Every move is a history row and an activity event (no money in the sentence). |
+| Permissions | `projects.project.view`, `projects.project.edit` (notes), `projects.stage.advance` (Farm Manager, granted once and back-filled); `projects.stage.override` is never granted by default. Field roles see no projects. |
+| Upgrade | Schema v16 creates a project for every existing tobacco season at the stage its records show (closed season → Closed; a sale → Grading and marketing; harvest or curing → Harvest and curing; transplants or operations → Growing; seedbeds → Land and seedbed; budget lines → Budget; otherwise Planning). Existing records are not changed; running it twice adds nothing. A new season starts at Idea. |
+| Hub | `projects` and `project_stage_history` are manager-only: field devices read none and write none over the Wi-Fi hub. |
+| Cloud | `0018_projects.sql`: both tables with composite tenant FKs, one live project per season, RLS by permission (a season manager may create the project and its first history row; stage moves need the advance right), default role permissions re-issued and back-filled. **Apply after every device runs v16.** Cloud rows are not back-filled in SQL: each upgrading device pushes its own. |
+| Tests | `src/services/projects.test.ts`, `src/ui.pipeline.test.tsx`, the 0018 block in `tests/migration.test.mjs`. |
+| Not done yet | Brain lookups for projects, budget baseline and versions (Step 2), funding requests and the contractor link (Step 3). |
+
 ## Phase 8 — Wi-Fi hub (no internet)
 
 | Area | What you get |
@@ -270,7 +283,7 @@ npm run tauri build  # installers
 Data is stored in a local SQLite database (sql.js, persisted to IndexedDB inside the Tauri webview; Phase 2 moves persistence to a native file).
 
 ## Supabase
-Apply `supabase/migrations/0001_foundation.sql`, `0002_claim_tenant.sql`, `0003_curing_chain.sql`, `0004_grading_marketing.sql`, `0005_contracts.sql`, then `0006_sharing.sql`, `0007_field_devices.sql`, `0008_budgets.sql`, `0009_machinery.sql`, `0010_allocation.sql`, `0011_buyers.sql`, `0012_activity_log.sql`, `0013_brain_chat_perms.sql`, `0014_reorder_level.sql`, `0015_fuel_and_links.sql`, `0016_derived_rows_insert_only.sql`, `0017_farm_modules.sql` (SQL editor or `supabase db push`). Create a user (Auth), then in **Sync & backup** enter project URL, publishable key and credentials. The device claims its local tenant id via `claim_tenant`, pushes, then pulls.
+Apply `supabase/migrations/0001_foundation.sql`, `0002_claim_tenant.sql`, `0003_curing_chain.sql`, `0004_grading_marketing.sql`, `0005_contracts.sql`, then `0006_sharing.sql`, `0007_field_devices.sql`, `0008_budgets.sql`, `0009_machinery.sql`, `0010_allocation.sql`, `0011_buyers.sql`, `0012_activity_log.sql`, `0013_brain_chat_perms.sql`, `0014_reorder_level.sql`, `0015_fuel_and_links.sql`, `0016_derived_rows_insert_only.sql`, `0017_farm_modules.sql`, `0018_projects.sql` (SQL editor or `supabase db push`). Create a user (Auth), then in **Sync & backup** enter project URL, publishable key and credentials. The device claims its local tenant id via `claim_tenant`, pushes, then pulls.
 
 ## Design rules
 - Everything is an event: purchases, applications, operations create linked ledger rows; costs are derived, never retyped.

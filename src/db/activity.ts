@@ -6,10 +6,10 @@ export type EventKind = 'action' | 'note' | 'voice' | 'photo' | 'system'
 export interface ActivityEvent { kind: EventKind; verb: string; domain: Domain; summary: string; body?: string | null; table_name?: string | null; row_id?: string | null; season_id?: string | null; field_id?: string | null; details?: unknown; occurred_at?: string; actor_id?: string | null; actor_name?: string | null }
 
 /** Rows that only repeat their parent (the parent's event already says it) or are the log itself. */
-export const NOT_LOGGED = new Set(['activity_log', 'cost_entries', 'operation_inputs', 'sale_lines', 'sale_deductions', 'grading_outputs', 'cycle_batches', 'curing_cycle_checks', 'buyer_deductions', 'contract_fields'])
+export const NOT_LOGGED = new Set(['activity_log', 'cost_entries', 'operation_inputs', 'sale_lines', 'sale_deductions', 'grading_outputs', 'cycle_batches', 'curing_cycle_checks', 'buyer_deductions', 'contract_fields', 'project_stage_history'])
 const FINANCE = new Set(['sales', 'sale_payments', 'budgets', 'allocation_rules', 'buyers', 'contracts', 'contractors', 'contract_advances', 'contract_obligations', 'contract_settlements'])
 const LABEL: Record<string, string> = {
-  farms: 'farm', seasons: 'season', blocks: 'block', fields: 'field', inputs: 'input', inventory_transactions: 'stock movement', seedbeds: 'seedbed', operations: 'operation', transplants: 'transplant',
+  farms: 'farm', seasons: 'season', projects: 'project', blocks: 'block', fields: 'field', inputs: 'input', inventory_transactions: 'stock movement', seedbeds: 'seedbed', operations: 'operation', transplants: 'transplant',
   harvest_batches: 'harvest batch', barns: 'barn', curing_cycles: 'curing cycle', curing_logs: 'curing log', storage_units: 'storage unit', contractors: 'contractor', contracts: 'contract',
   contract_advances: 'contract advance', contract_obligations: 'contract obligation', contract_settlements: 'contract settlement', grades: 'grade', grading_lots: 'grading lot', bales: 'bale', sales: 'sale',
   sale_payments: 'sale payment', labour_entries: 'labour entry', budgets: 'budget line', machines: 'machine', machine_logs: 'machine log', allocation_rules: 'allocation rule', weather_records: 'weather record', buyers: 'buyer',

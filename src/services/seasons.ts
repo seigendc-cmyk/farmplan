@@ -1,6 +1,7 @@
 import { type Ctx, require, need, isDate } from './context'
 import { enabledModules, currentModule } from './modules'
 import { moduleLabel } from '../modules/registry'
+import { addProject } from '../db/projectlink'
 
 export interface Season { id: string; label: string; enterprise: string; starts_on: string; ends_on: string; status: string }
 
@@ -23,6 +24,7 @@ export function createSeason(ctx: Ctx, i: { label: string; starts_on: string; en
       ctx.db.update('seasons', s.id, { status: 'planned' })
     const id = ctx.db.insert('seasons', { tenant_id: ctx.tenantId, farm_id: ctx.farmId, enterprise, label: i.label.trim(),
       starts_on: i.starts_on, ends_on: i.ends_on, status: i.activate ? 'active' : 'planned' })
+    addProject(ctx.db, { id, tenant_id: ctx.tenantId, farm_id: ctx.farmId, enterprise }, 'idea', null)   // every season starts a project at Idea (when its module has a pipeline)
     ctx.db.audit(ctx.actor?.id ?? null, 'season.create', 'seasons', id)
     return id
   })

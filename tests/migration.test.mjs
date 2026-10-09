@@ -582,4 +582,44 @@ await as(B); assert.equal((await db.query(`update farms set modules='livestock' 
 await db.exec(`reset role`)
 assert.equal((await db.query(`select modules from farms where id='${farm}'`)).rows[0].modules,'tobacco,orchards')
 
+// ---- 0018: project pipeline ----
+await db.exec(`reset role`)
+await db.exec(readFileSync('supabase/migrations/0018_projects.sql','utf8'))
+await db.exec(`grant all on all tables in schema public to authenticated; grant execute on all functions in schema public to authenticated;`)   // Supabase's default grants for the new tables
+const pp=async role=>(await db.query(`select count(*)::int n from role_permissions rp join roles r on r.id=rp.role_id where r.tenant_id='${ta}' and r.name='${role}' and rp.permission like 'projects.%'`)).rows[0].n
+assert.equal(await pp('Farm Manager'),3); assert.equal(await pp('Field Recorder'),0); assert.equal(await pp('Store Clerk'),0)   // managers back-filled; field roles see no projects; override never granted
+assert.equal((await db.query(`select count(*)::int n from role_permissions rp join roles r on r.id=rp.role_id where r.tenant_id='${ta}' and rp.permission='projects.stage.override'`)).rows[0].n,0)
+const s18=(await db.query(`insert into seasons(tenant_id,farm_id,label,starts_on,ends_on) values ('${ta}','${farm}','2028/29','2028-09-01','2029-08-31') returning id`)).rows[0].id
+const s18b=(await db.query(`insert into seasons(tenant_id,farm_id,label,starts_on,ends_on) values ('${ta}','${farm}','2029/30','2029-09-01','2030-08-31') returning id`)).rows[0].id
+const SM='00000000-0000-0000-0000-0000000000a9', VW='00000000-0000-0000-0000-0000000000aa'
+await db.exec(`insert into auth.users values ('${SM}'),('${VW}')`)
+await db.query(`insert into tenant_members(tenant_id,user_id,role_id) values ('${ta}','${SM}','${await role16('Season manager',['settings.season.view','settings.season.manage'])}'),('${ta}','${VW}','${await role16('Pipeline viewer',['projects.project.view'])}')`)
+await db.exec(`set role authenticated`)
+await as(M)
+const prj=(await db.query(`insert into projects(tenant_id,farm_id,season_id,stage) values ('${ta}','${farm}','${s18}','idea') returning id`)).rows[0].id   // Farm Manager creates and reads
+await db.query(`insert into project_stage_history(tenant_id,project_id,to_stage,kind,changed_on) values ('${ta}','${prj}','idea','create','2028-09-01')`)
+await db.query(`update projects set stage='planning' where id='${prj}'`)
+await db.query(`insert into project_stage_history(tenant_id,project_id,from_stage,to_stage,kind,reason,changed_on) values ('${ta}','${prj}','idea','planning','advance',null,'2028-09-02')`)
+await assert.rejects(()=>db.query(`insert into projects(tenant_id,farm_id,season_id,stage) values ('${ta}','${farm}','${s18}','idea')`), e=>e.code==='23505')   // one project per season
+await assert.rejects(()=>db.query(`insert into project_stage_history(tenant_id,project_id,to_stage,kind,changed_on) values ('${ta}','${prj}','x','teleport','2028-09-03')`), /check/)
+await as(SM)   // may start a project when creating a season, may not read, move or edit it
+const prj2=crypto.randomUUID()
+await db.query(`insert into projects(id,tenant_id,farm_id,season_id,stage) values ('${prj2}','${ta}','${farm}','${s18b}','idea')`)
+await db.query(`insert into project_stage_history(tenant_id,project_id,to_stage,kind,changed_on) values ('${ta}','${prj2}','idea','create','2029-09-01')`)
+await assert.rejects(()=>db.query(`insert into project_stage_history(tenant_id,project_id,from_stage,to_stage,kind,changed_on) values ('${ta}','${prj2}','idea','planning','advance','2029-09-02')`), RLS)   // moving a stage needs the advance right
+assert.equal((await db.query(`select * from projects`)).rows.length,0)
+assert.equal((await db.query(`update projects set stage='growing' where id='${prj}' returning id`)).rows.length,0)
+await as(VW)   // viewer reads, cannot write
+assert.equal((await db.query(`select * from projects`)).rows.length,2); assert.equal((await db.query(`select * from project_stage_history`)).rows.length,3)
+assert.equal((await db.query(`update projects set stage='growing' where id='${prj}' returning id`)).rows.length,0)
+await assert.rejects(()=>db.query(`insert into projects(tenant_id,farm_id,season_id,stage) values ('${ta}','${farm}','${s18}','idea')`), RLS)
+await as(D); assert.equal((await db.query(`select * from projects`)).rows.length,0); assert.equal((await db.query(`select * from project_stage_history`)).rows.length,0)   // Field Recorder sees none
+await assert.rejects(()=>db.query(`insert into projects(tenant_id,farm_id,season_id,stage) values ('${ta}','${farm}','${s18}','idea')`), RLS)
+await as(B); assert.equal((await db.query(`select * from projects`)).rows.length,0)   // another tenant sees none
+await assert.rejects(()=>db.query(`insert into projects(tenant_id,farm_id,season_id,stage) values ('${tb}','${fb}','${s18}','idea')`))   // composite FK: another tenant's season
+await db.exec(`reset role`)
+assert.equal((await db.query(`select stage from projects where id='${prj}'`)).rows[0].stage,'planning')
+assert.equal((await db.query(`select count(*)::int n from projects where id='${prj2}'`)).rows[0].n,1)   // the season manager's insert landed
+assert.equal((await db.query(`select count(*)::int n from project_stage_history where project_id='${prj2}'`)).rows[0].n,1)
+
 console.log('ALL MIGRATION TESTS PASSED')

@@ -2,12 +2,14 @@ import type { Db } from './database'
 import { hubReindex } from './hublog'
 import { adoptBuyerNames } from './buyerlink'
 import { backfillActivity } from './activity'
-import { PHASE10_GRANTS, PHASE11_GRANTS, PHASE12_GRANTS, PHASE2_GRANTS, PHASE3_GRANTS, PHASE4_GRANTS, PHASE5_GRANTS, PHASE6_GRANTS, PHASE7_GRANTS } from '../lib/permissions'
+import { backfillProjects } from './projectlink'
+import { PHASE10_GRANTS, PHASE11_GRANTS, PHASE12_GRANTS, PHASE13_GRANTS, PHASE2_GRANTS, PHASE3_GRANTS, PHASE4_GRANTS, PHASE5_GRANTS, PHASE6_GRANTS, PHASE7_GRANTS } from '../lib/permissions'
 
 /** In-place upgrades for databases created by an earlier schema version. New tables arrive via `CREATE IF NOT EXISTS` in DDL. */
 export function runMigrations(db: Db, from: number) {
   if (from < 9) hubReindex(db)
   db.tx(() => {
+    if (from < 16) { grantOnce(db, PHASE13_GRANTS); backfillProjects(db) }   // Platform step 1: a project for every existing tobacco season, at the stage its data shows
     if (from < 15) {   // Modules: a farm lists the modules it uses; every existing farm keeps running Tobacco only. No permission grant: the Owner role holds '*'.
       const cols = db.all<{ name: string }>(`PRAGMA table_info(farms)`).map(c => c.name)
       if (cols.length && !cols.includes('modules')) db.run(`ALTER TABLE farms ADD COLUMN modules TEXT NOT NULL DEFAULT 'tobacco'`)

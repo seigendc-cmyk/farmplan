@@ -70,6 +70,12 @@ export const PERMISSION_GROUPS: PermissionGroup[] = [
     { key: 'finance.budget.view', label: 'View budgets' },
     { key: 'finance.budget.edit', label: 'Set season budgets' },
   ]},
+  { menu: 'Projects', items: [
+    { key: 'projects.project.view', label: 'View the project pipeline' },
+    { key: 'projects.project.edit', label: 'Edit project notes' },
+    { key: 'projects.stage.advance', label: 'Move projects forward or back a stage' },
+    { key: 'projects.stage.override', label: 'Move a project past an unmet requirement (reason is logged)' },
+  ]},
   { menu: 'Settings', items: [
     { key: 'settings.farm.view', label: 'View farm' },
     { key: 'settings.farm.manage', label: 'Manage farm' },
@@ -137,6 +143,11 @@ export const PHASE12_GRANTS: Record<string, string[]> = {
   'Farm Manager': ['brain.chat.ask'],
 }
 
+/** Permissions introduced with the project pipeline (schema v16). Overriding an unmet stage requirement stays with the Owner unless granted. */
+export const PHASE13_GRANTS: Record<string, string[]> = {
+  'Farm Manager': ['projects.project.view','projects.project.edit','projects.stage.advance'],
+}
+
 /** One-click access levels an admin can apply to a role; they only touch the business-brain permissions. */
 export const BRAIN_KEYS = ['brain.note.record', 'brain.log.view_own', 'brain.log.view_ops', 'brain.log.view_finance', 'brain.log.view_admin']
 export const BRAIN_LEVELS: { id: string; label: string; help: string; perms: string[] }[] = [
@@ -155,7 +166,7 @@ export const SYSTEM_ROLES: Record<string, string[]> = {
     'settings.farm.view','settings.season.view','settings.season.manage',
     'production.field.view','production.field.edit','production.seedbed.view','production.seedbed.edit',
     'production.operation.view','production.operation.record','production.weather.view','production.weather.record',
-    'resources.inventory.view','resources.inventory.manage','finance.cost.view', ...PHASE2_GRANTS['Farm Manager'], ...PHASE3_GRANTS['Farm Manager'], ...PHASE4_GRANTS['Farm Manager'], ...PHASE5_GRANTS['Farm Manager'], ...PHASE6_GRANTS['Farm Manager'], ...PHASE7_GRANTS['Farm Manager'], ...PHASE10_GRANTS['Farm Manager'], ...PHASE11_GRANTS['Farm Manager'], ...PHASE12_GRANTS['Farm Manager']],
+    'resources.inventory.view','resources.inventory.manage','finance.cost.view', ...PHASE2_GRANTS['Farm Manager'], ...PHASE3_GRANTS['Farm Manager'], ...PHASE4_GRANTS['Farm Manager'], ...PHASE5_GRANTS['Farm Manager'], ...PHASE6_GRANTS['Farm Manager'], ...PHASE7_GRANTS['Farm Manager'], ...PHASE10_GRANTS['Farm Manager'], ...PHASE11_GRANTS['Farm Manager'], ...PHASE12_GRANTS['Farm Manager'], ...PHASE13_GRANTS['Farm Manager']],
   'Store Clerk': ['settings.farm.view','resources.inventory.view','resources.inventory.manage'],
   'Field Recorder': [
     'settings.farm.view','production.field.view','production.seedbed.view',
