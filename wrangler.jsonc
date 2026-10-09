@@ -1,0 +1,6 @@
+{
+  // Cloudflare Workers static-assets deploy of the built app (dist/). No Worker code: the app is a static single-page bundle (HashRouter, so no redirect rules).
+  "name": "farmplan",
+  "compatibility_date": "2025-01-01",
+  "assets": { "directory": "./dist" }
+}
