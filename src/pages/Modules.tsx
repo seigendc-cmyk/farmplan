@@ -19,7 +19,7 @@ export default function Modules() {
             <input id={`mod-${m.id}`} type="checkbox" className="mt-1" checked={pick.includes(m.id)} disabled={!m.available}
               onChange={e => setPick(e.target.checked ? [...pick, m.id] : pick.filter(x => x !== m.id))} />
             <label htmlFor={`mod-${m.id}`} className="flex-1">
-              <span className="font-medium">{m.label}</span>{!m.available && <Badge tone="gray">coming soon</Badge>}
+              <span className="font-medium">{m.label}</span>{!m.available && <span className="ml-2"><Badge tone="gray">coming soon</Badge></span>}
               <span className="block text-sm text-gray-500">{m.blurb}</span>
             </label>
           </li>))}
