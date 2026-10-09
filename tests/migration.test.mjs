@@ -656,4 +656,33 @@ await assert.rejects(()=>db.query(`insert into budget_versions(tenant_id,farm_id
 await db.exec(`reset role`)
 assert.equal((await db.query(`select count(*)::int n from budget_version_lines`)).rows[0].n,2)
 
+// ---- 0020: project funding ----
+await db.exec(`reset role`)
+await db.exec(readFileSync('supabase/migrations/0020_funding.sql','utf8'))
+await db.exec(`grant all on all tables in schema public to authenticated; grant execute on all functions in schema public to authenticated;`)
+const fp=async role=>(await db.query(`select count(*)::int n from role_permissions rp join roles r on r.id=rp.role_id where r.tenant_id='${ta}' and r.name='${role}' and rp.permission like 'projects.funding.%'`)).rows[0].n
+assert.equal(await fp('Farm Manager'),2); assert.equal(await fp('Field Recorder'),0); assert.equal(await fp('Store Clerk'),0)   // managers back-filled; field roles see no funding
+const kk=(await db.query(`insert into contractors(tenant_id,farm_id,name) values ('${ta}','${farm}','Boka') returning id`)).rows[0].id
+const ct20=(await db.query(`insert into contracts(tenant_id,farm_id,season_id,code,contractor_id) values ('${ta}','${farm}','${s19}','CT-0020','${kk}') returning id`)).rows[0].id
+await db.query(`update projects set contract_id='${ct20}', contractor_id='${kk}' where id='${prj}'`)
+await assert.rejects(()=>db.query(`update projects set independent=true where id='${prj}'`), /projects_link_or_independent/)   // linked or independent, not both
+await db.query(`update projects set contract_id=null, contractor_id=null, independent=true where id='${prj}'`)
+const fr20=crypto.randomUUID(), frSql=`insert into funding_requests(id,tenant_id,farm_id,project_id,funder_kind,funder_name,purpose,amount_requested) values ('${fr20}','${ta}','${farm}','${prj}','lender','AgriBank','Seed',5000)`
+await db.exec(`set role authenticated`)
+await as(M); await db.query(frSql); await db.query(`update funding_requests set status='submitted' where id='${fr20}'`)                      // Farm Manager raises and moves requests
+const ev20=`insert into funding_events(tenant_id,request_id,kind,form,amount,occurred_on) values ('${ta}','${fr20}','disbursement','cash',2000,'2030-10-10')`
+await db.query(ev20); await db.query(`insert into funding_events(tenant_id,request_id,kind,amount,occurred_on) values ('${ta}','${fr20}','repayment',500,'2030-11-10')`)
+await assert.rejects(()=>db.query(`insert into funding_events(tenant_id,request_id,kind,form,amount,occurred_on) values ('${ta}','${fr20}','repayment','cash',5,'2030-11-10')`), /check/)      // a repayment has no form
+await assert.rejects(()=>db.query(`insert into funding_events(tenant_id,request_id,kind,form,amount,occurred_on) values ('${ta}','${fr20}','disbursement','inputs',5,'2030-11-10')`), /check/)   // inputs need a product and quantity
+await assert.rejects(()=>db.query(`insert into funding_events(tenant_id,request_id,kind,form,amount,occurred_on) values ('${ta}','${fr20}','disbursement','cash',0,'2030-11-10')`), /check/)
+await assert.rejects(()=>db.query(frSql.replace('Seed',"Other").replace(fr20,crypto.randomUUID()).replace("'lender'","'bank'")), /check/)    // unknown funder kind
+await as(VW)   // may view projects but has no funding rights
+assert.equal((await db.query(`select * from funding_requests`)).rows.length,0); assert.equal((await db.query(`select * from funding_events`)).rows.length,0)
+await assert.rejects(()=>db.query(frSql.replace(fr20,crypto.randomUUID())), RLS)
+await as(D); assert.equal((await db.query(`select * from funding_requests`)).rows.length,0); await assert.rejects(()=>db.query(frSql.replace(fr20,crypto.randomUUID())), RLS)   // Field Recorder
+await as(B); assert.equal((await db.query(`select * from funding_requests`)).rows.length,0)
+await assert.rejects(()=>db.query(`insert into funding_requests(tenant_id,farm_id,project_id,funder_kind,funder_name,purpose,amount_requested) values ('${tb}','${fb}','${prj}','lender','X','Y',1)`))   // composite FK: another tenant's project
+await as(M); assert.equal((await db.query(`select * from funding_requests`)).rows.length,1); assert.equal((await db.query(`select * from funding_events`)).rows.length,2)
+await db.exec(`reset role`)
+
 console.log('ALL MIGRATION TESTS PASSED')

@@ -16,7 +16,7 @@ export const HUB_VERSION = 1
 /** Tables a field phone may write. Everything else is refused (422) so it is quarantined on the phone rather than blocking its sync. */
 export const HUB_WRITE_TABLES = new Set(['operations', 'operation_inputs', 'inventory_transactions', 'cost_entries', 'weather_records', 'harvest_batches', 'labour_entries', 'machine_logs', 'activity_log'])
 /** Never sent to phones over the hub (bank details live here). */
-export const HUB_NO_READ = new Set(['buyers', 'buyer_deductions', 'activity_log', 'projects', 'project_stage_history', 'budget_versions', 'budget_version_lines'])
+export const HUB_NO_READ = new Set(['buyers', 'buyer_deductions', 'activity_log', 'projects', 'project_stage_history', 'budget_versions', 'budget_version_lines', 'funding_requests', 'funding_events'])
 const PAIR_MINUTES = 10, MAX_PAIR_FAILS = 5
 
 export interface HubRequest { method: string; path: string; auth?: string | null; body?: unknown }

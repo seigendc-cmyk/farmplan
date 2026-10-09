@@ -13,6 +13,7 @@ import { Setup, Login } from './pages/Auth'
 import Dashboard from './pages/Dashboard'
 import Seasons from './pages/Seasons'
 import Pipeline from './pages/Pipeline'
+import Funding from './pages/Funding'
 import Fields from './pages/Fields'
 import FieldRecord from './pages/FieldRecord'
 import Seedbeds from './pages/Seedbeds'
@@ -48,7 +49,7 @@ interface NavItem { to?: string; label: string; perm?: string; anyOf?: string[] 
 /** `module`: the group shows only while that module is the one being worked in; no `module` means shared by every module. */
 const NAV: { group: string; module?: string; items: NavItem[] }[] = [
   { group: '', items: [{ to: '/', label: 'Dashboard' }] },
-  { group: 'Projects', items: [{ to: '/pipeline', label: 'Pipeline', perm: 'projects.project.view' }] },
+  { group: 'Projects', items: [{ to: '/pipeline', label: 'Pipeline', perm: 'projects.project.view' }, { to: '/funding', label: 'Funding', perm: 'projects.funding.view' }] },
   { group: 'Production', module: 'tobacco', items: [
     { to: '/seedbeds', label: 'Seedbeds', perm: 'production.seedbed.view' }, { to: '/fields', label: 'Fields', perm: 'production.field.view' },
     { to: '/operations', label: 'Operations', perm: 'production.operation.view' },
@@ -195,6 +196,7 @@ function Shell() {
             <Route path="/costs" element={<Costs />} />
             <Route path="/seasons" element={<Seasons />} />
             <Route path="/pipeline" element={<Pipeline />} />
+            <Route path="/funding" element={<Funding />} />
             <Route path="/modules" element={<Modules />} />
             <Route path="/access" element={<Access />} />
             <Route path="/sync" element={<SyncPage />} />

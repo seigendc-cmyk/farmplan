@@ -1,5 +1,5 @@
 // Local SQLite schema. Mirrors supabase/migrations/0001_foundation.sql so rows sync 1:1.
-export const SCHEMA_VERSION = 17
+export const SCHEMA_VERSION = 18
 
 const common = `
   created_at TEXT NOT NULL DEFAULT (datetime('now')),
@@ -266,7 +266,8 @@ CREATE UNIQUE INDEX IF NOT EXISTS ux_budget_cat ON budgets(season_id, category) 
 CREATE TABLE IF NOT EXISTS projects (
   id TEXT PRIMARY KEY, tenant_id TEXT NOT NULL, farm_id TEXT NOT NULL REFERENCES farms(id),
   season_id TEXT NOT NULL REFERENCES seasons(id), stage TEXT NOT NULL, notes TEXT,
-  plan_ha REAL CHECK (plan_ha IS NULL OR plan_ha > 0), plan_yield_kg_ha REAL CHECK (plan_yield_kg_ha IS NULL OR plan_yield_kg_ha > 0), plan_price_kg REAL CHECK (plan_price_kg IS NULL OR plan_price_kg >= 0), ${common});
+  plan_ha REAL CHECK (plan_ha IS NULL OR plan_ha > 0), plan_yield_kg_ha REAL CHECK (plan_yield_kg_ha IS NULL OR plan_yield_kg_ha > 0), plan_price_kg REAL CHECK (plan_price_kg IS NULL OR plan_price_kg >= 0),
+  contractor_id TEXT REFERENCES contractors(id), contract_id TEXT REFERENCES contracts(id), independent INTEGER NOT NULL DEFAULT 0, funding_not_needed INTEGER NOT NULL DEFAULT 0, ${common});
 CREATE UNIQUE INDEX IF NOT EXISTS ux_project_season ON projects(season_id) WHERE deleted_at IS NULL;
 CREATE TABLE IF NOT EXISTS project_stage_history (
   id TEXT PRIMARY KEY, tenant_id TEXT NOT NULL, project_id TEXT NOT NULL REFERENCES projects(id), from_stage TEXT, to_stage TEXT NOT NULL,
@@ -282,6 +283,22 @@ CREATE TABLE IF NOT EXISTS budget_version_lines (
   id TEXT PRIMARY KEY, tenant_id TEXT NOT NULL, version_id TEXT NOT NULL REFERENCES budget_versions(id), category TEXT NOT NULL,
   amount REAL NOT NULL CHECK (amount >= 0), expected_month TEXT, ${common});
 CREATE INDEX IF NOT EXISTS ix_bvl_version ON budget_version_lines(version_id);
+
+-- ---- Platform step 3: funding. A request per funder; events are the money that actually moved (disbursements and repayments). ----
+CREATE TABLE IF NOT EXISTS funding_requests (
+  id TEXT PRIMARY KEY, tenant_id TEXT NOT NULL, farm_id TEXT NOT NULL REFERENCES farms(id), project_id TEXT NOT NULL REFERENCES projects(id),
+  funder_kind TEXT NOT NULL CHECK (funder_kind IN ('contractor','lender','investor','other')), funder_name TEXT NOT NULL, purpose TEXT NOT NULL,
+  amount_requested REAL NOT NULL CHECK (amount_requested > 0), needed_by TEXT, repayment_source TEXT, repayment_due TEXT,
+  interest_pct REAL NOT NULL DEFAULT 0 CHECK (interest_pct >= 0), terms TEXT, covers TEXT,
+  status TEXT NOT NULL DEFAULT 'draft' CHECK (status IN ('draft','submitted','approved','disbursed','repaid','declined','withdrawn')),
+  amount_approved REAL CHECK (amount_approved IS NULL OR amount_approved >= 0), decided_on TEXT, notes TEXT, ${common});
+CREATE INDEX IF NOT EXISTS ix_funding_project ON funding_requests(project_id) WHERE deleted_at IS NULL;
+CREATE TABLE IF NOT EXISTS funding_events (
+  id TEXT PRIMARY KEY, tenant_id TEXT NOT NULL, request_id TEXT NOT NULL REFERENCES funding_requests(id),
+  kind TEXT NOT NULL CHECK (kind IN ('disbursement','repayment')), form TEXT CHECK (form IS NULL OR form IN ('cash','inputs')),
+  amount REAL NOT NULL CHECK (amount > 0), occurred_on TEXT NOT NULL, input_id TEXT REFERENCES inputs(id), qty REAL,
+  inventory_txn_id TEXT REFERENCES inventory_transactions(id), note TEXT, ${common});
+CREATE INDEX IF NOT EXISTS ix_funding_events_request ON funding_events(request_id);
 
 -- Read-only BI layer: the only objects natural-language questions may touch. No users, PINs, outbox or audit data.
 DROP VIEW IF EXISTS bi_seasons; CREATE VIEW bi_seasons AS SELECT label AS season, starts_on, ends_on, status FROM seasons WHERE deleted_at IS NULL;

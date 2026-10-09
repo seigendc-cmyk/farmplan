@@ -47,7 +47,7 @@ describe('moving between stages', () => {
     approveBaseline(o, season); expect(getProject(o, pid).unmet).toEqual([]); advanceProject(o, pid); expect(stage()).toBe('funding')
   })
   it('Contracted can be skipped, and the skip is written in the history', () => {
-    db.run(`UPDATE projects SET stage='funding' WHERE id=?`, [pid]); expect(getProject(o, pid).skip_to).toBe('land_seedbed')
+    db.run(`UPDATE projects SET stage='funding', funding_not_needed=1 WHERE id=?`, [pid]); expect(getProject(o, pid).skip_to).toBe('land_seedbed')
     expect(() => advanceProject(o, pid, { to: 'growing' })).toThrow(/Cannot move/)
     advanceProject(o, pid, { to: 'land_seedbed' }); expect(stage()).toBe('land_seedbed'); expect(projectHistory(o, pid).at(-1)!.reason).toMatch(/Skipped Contracted \(optional\)/)
   })
@@ -102,7 +102,7 @@ describe('permissions and notes', () => {
   })
   it('a Farm Manager gets view, notes and advance but not override; a Field Recorder sees nothing', async () => {
     const roles = db.all<{ name: string; permission: string }>(`SELECT r.name, rp.permission FROM roles r JOIN role_permissions rp ON rp.role_id=r.id WHERE rp.permission LIKE 'projects.%'`)
-    expect(roles.filter(r => r.name === 'Farm Manager').map(r => r.permission).sort()).toEqual(['projects.project.edit', 'projects.project.view', 'projects.stage.advance'])
+    expect(roles.filter(r => r.name === 'Farm Manager').map(r => r.permission).sort()).toEqual(['projects.funding.edit', 'projects.funding.view', 'projects.project.edit', 'projects.project.view', 'projects.stage.advance'])
     expect(roles.some(r => r.name === 'Field Recorder')).toBe(false)
   })
   it('an unknown project id is refused', () => { expect(() => getProject(o, 'nope')).toThrow(ValidationError) })
@@ -126,7 +126,7 @@ describe('existing data', () => {
     expect(by).toEqual({ '2026/27': 'planning', Grow: 'growing', Sold: 'grading_marketing', Done: 'closed', Budgeted: 'budget' })
     expect(projectHistory(u, listProjects(u)[0].id)[0]).toMatchObject({ kind: 'create' })
     expect(up.all(`SELECT * FROM cost_entries`)).toHaveLength(before)
-    expect(up.get<{ value: string }>(`SELECT value FROM meta WHERE key='schema_version'`)!.value).toBe('17')
+    expect(up.get<{ value: string }>(`SELECT value FROM meta WHERE key='schema_version'`)!.value).toBe('18')
     expect(up.all(`SELECT 1 FROM role_permissions rp JOIN roles r ON r.id=rp.role_id WHERE r.name='Farm Manager' AND rp.permission='projects.stage.advance'`)).toHaveLength(1)
     const again = up.all(`SELECT 1 FROM projects`).length; const { backfillProjects } = await import('../db/projectlink'); backfillProjects(up); expect(up.all(`SELECT 1 FROM projects`)).toHaveLength(again)   // running it twice adds nothing
   })

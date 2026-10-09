@@ -263,6 +263,21 @@ Design and decisions: `docs/CLOUD_DERIVED_ROWS_DESIGN.md`. A security change tha
 | Not done | Plan figures from crop templates (seed, inputs, labour, fuel and machinery hours) wait for the crop templates that arrive with Horticulture; brain lookups; a funding request built from the cash need (Step 3). |
 | Tests | `src/services/budgetplan.test.ts`, `src/ui.budgetplan.test.tsx`, the 0019 block in `tests/migration.test.mjs`. |
 
+## Funding — requests, repayments, funding pack, contractor link (Platform Step 3, schema v18)
+| | |
+|---|---|
+| Screen | **Funding** (nav, needs `projects.funding.view`). Pick a project; link it to a contract or mark it **independent**; raise requests; open one to submit, approve, decline, withdraw, record money received and repayments, and build the funding pack. **Pipeline → open a project** shows a link to this screen at the Funding and Contracted stages. |
+| Requests | `funding_requests`, one per funder: kind (contractor / lender / investor / other), funder, purpose, amount, needed-by, repayment source and due date, interest %, terms, budget categories covered. Status runs draft → submitted → approved → disbursed → repaid; declined and withdrawn end it. Only a draft can be reworded or deleted. |
+| Money | `funding_events` are disbursements (cash, or **inputs**, which post an inventory purchase of that product and quantity) and repayments. Deleting an inputs event reverses its stock movement. Needs `projects.funding.edit`. |
+| Interest | **Assumption:** simple interest, 365-day year, charged on the outstanding principal; a repayment pays accrued interest first. This is a planning figure, not a lender's statement. Confirm it matches your agreements before relying on it. |
+| Contractor | A contractor's advances are **read** from `contract_advances` and `contract_settlements.advances_recovered`, never copied, so the contract screen and the funding screen show the same rows. A request of kind contractor can be raised, but money is recorded on the contract, not on the request. |
+| Gates | Leaving **Funding** needs a request or "no funding needed"; leaving **Contracted** needs a linked contract or "independent". Same owner-override rule as the other stages. |
+| Upgrade | Schema v18 adds `contractor_id`, `contract_id`, `independent`, `funding_not_needed` to projects and the two tables. New permissions `projects.funding.view` and `projects.funding.edit` are granted once to Farm Manager (the Owner holds `*`). `projects` and its history now sync after contracts. |
+| Hub | `funding_requests` and `funding_events` are hidden from field devices. Activity events name the funder and status, never amounts. |
+| Cloud | `0020_funding.sql`: the two tables with RLS, composite tenant FKs, checks, touch/lock/audit triggers, projects link columns and a link-or-independent check, and the re-issued `default_role_permissions()` with a back-fill. **Apply after every device runs v18.** |
+| Not done | No cash ledger or bank reconciliation; no brain lookups for funding; the pack is a screen to print, not a PDF; no interest other than simple; cloud tables were tested in PGlite only, not on a live Supabase project. |
+| Tests | `src/services/funding.test.ts`, `src/ui.funding.test.tsx`, the 0020 block in `tests/migration.test.mjs`. |
+
 ## Phase 8 — Wi-Fi hub (no internet)
 
 | Area | What you get |
@@ -296,7 +311,7 @@ npm run tauri build  # installers
 Data is stored in a local SQLite database (sql.js, persisted to IndexedDB inside the Tauri webview; Phase 2 moves persistence to a native file).
 
 ## Supabase
-Apply `supabase/migrations/0001_foundation.sql`, `0002_claim_tenant.sql`, `0003_curing_chain.sql`, `0004_grading_marketing.sql`, `0005_contracts.sql`, then `0006_sharing.sql`, `0007_field_devices.sql`, `0008_budgets.sql`, `0009_machinery.sql`, `0010_allocation.sql`, `0011_buyers.sql`, `0012_activity_log.sql`, `0013_brain_chat_perms.sql`, `0014_reorder_level.sql`, `0015_fuel_and_links.sql`, `0016_derived_rows_insert_only.sql`, `0017_farm_modules.sql`, `0018_projects.sql`, `0019_budget_versions.sql` (SQL editor or `supabase db push`). Create a user (Auth), then in **Sync & backup** enter project URL, publishable key and credentials. The device claims its local tenant id via `claim_tenant`, pushes, then pulls.
+Apply `supabase/migrations/0001_foundation.sql`, `0002_claim_tenant.sql`, `0003_curing_chain.sql`, `0004_grading_marketing.sql`, `0005_contracts.sql`, then `0006_sharing.sql`, `0007_field_devices.sql`, `0008_budgets.sql`, `0009_machinery.sql`, `0010_allocation.sql`, `0011_buyers.sql`, `0012_activity_log.sql`, `0013_brain_chat_perms.sql`, `0014_reorder_level.sql`, `0015_fuel_and_links.sql`, `0016_derived_rows_insert_only.sql`, `0017_farm_modules.sql`, `0018_projects.sql`, `0019_budget_versions.sql`, `0020_funding.sql` (SQL editor or `supabase db push`). Create a user (Auth), then in **Sync & backup** enter project URL, publishable key and credentials. The device claims its local tenant id via `claim_tenant`, pushes, then pulls.
 
 ## Design rules
 - Everything is an event: purchases, applications, operations create linked ledger rows; costs are derived, never retyped.

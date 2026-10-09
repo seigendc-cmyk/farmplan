@@ -4,12 +4,18 @@ import { adoptBuyerNames } from './buyerlink'
 import { backfillActivity } from './activity'
 import { backfillProjects } from './projectlink'
 import { backfillBaselines } from './budgetlink'
-import { PHASE10_GRANTS, PHASE11_GRANTS, PHASE12_GRANTS, PHASE13_GRANTS, PHASE2_GRANTS, PHASE3_GRANTS, PHASE4_GRANTS, PHASE5_GRANTS, PHASE6_GRANTS, PHASE7_GRANTS } from '../lib/permissions'
+import { PHASE10_GRANTS, PHASE11_GRANTS, PHASE12_GRANTS, PHASE13_GRANTS, PHASE14_GRANTS, PHASE2_GRANTS, PHASE3_GRANTS, PHASE4_GRANTS, PHASE5_GRANTS, PHASE6_GRANTS, PHASE7_GRANTS } from '../lib/permissions'
 
 /** In-place upgrades for databases created by an earlier schema version. New tables arrive via `CREATE IF NOT EXISTS` in DDL. */
 export function runMigrations(db: Db, from: number) {
   if (from < 9) hubReindex(db)
   db.tx(() => {
+    if (from < 18) {   // Platform step 3: funding. The link to a contractor and contract, and the two flags, live on the project; Farm Managers get the funding rights once.
+      const add = (table: string, col: string, ddl: string) => { const cols = db.all<{ name: string }>(`PRAGMA table_info(${table})`).map(c => c.name); if (cols.length && !cols.includes(col)) db.run(`ALTER TABLE ${table} ADD COLUMN ${col} ${ddl}`) }
+      add('projects', 'contractor_id', 'TEXT REFERENCES contractors(id)'); add('projects', 'contract_id', 'TEXT REFERENCES contracts(id)')
+      add('projects', 'independent', 'INTEGER NOT NULL DEFAULT 0'); add('projects', 'funding_not_needed', 'INTEGER NOT NULL DEFAULT 0')
+      grantOnce(db, PHASE14_GRANTS)
+    }
     if (from < 17) {   // Platform step 2: plan fields on projects, a month on budget lines, and each existing season budget becomes version 1 unchanged. No grant: approving stays with the Owner ('*').
       const add = (table: string, col: string, ddl: string) => { const cols = db.all<{ name: string }>(`PRAGMA table_info(${table})`).map(c => c.name); if (cols.length && !cols.includes(col)) db.run(`ALTER TABLE ${table} ADD COLUMN ${col} ${ddl}`) }
       add('projects', 'plan_ha', 'REAL CHECK (plan_ha IS NULL OR plan_ha > 0)'); add('projects', 'plan_yield_kg_ha', 'REAL CHECK (plan_yield_kg_ha IS NULL OR plan_yield_kg_ha > 0)'); add('projects', 'plan_price_kg', 'REAL CHECK (plan_price_kg IS NULL OR plan_price_kg >= 0)')

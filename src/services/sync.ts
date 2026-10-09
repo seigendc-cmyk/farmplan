@@ -37,7 +37,7 @@ export const PUSH_LATE = ['inventory_transactions', 'operation_inputs', 'contrac
 export const PUSH_ORDER: readonly string[] = [...SYNC_ORDER.filter(t => !(PUSH_LATE as readonly string[]).includes(t)), ...PUSH_LATE]
 const FUEL_LINKED = ['machine_logs', 'curing_logs']
 
-export const BOOL_COLS: Record<string, string[]> = { fields: ['irrigated'], inputs: ['active'], barns: ['active'], grades: ['active'], contractors: ['active'], machines: ['active'], buyers: ['active'], contract_obligations: ['done'] }
+export const BOOL_COLS: Record<string, string[]> = { fields: ['irrigated'], inputs: ['active'], barns: ['active'], grades: ['active'], contractors: ['active'], machines: ['active'], buyers: ['active'], contract_obligations: ['done'], projects: ['independent', 'funding_not_needed'] }
 const LOCAL_ONLY_COLS = new Set<string>([])
 
 function toCloud(table: string, row: Row): CloudRow {

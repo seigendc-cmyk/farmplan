@@ -7,9 +7,9 @@ export interface ActivityEvent { kind: EventKind; verb: string; domain: Domain; 
 
 /** Rows that only repeat their parent (the parent's event already says it) or are the log itself. */
 export const NOT_LOGGED = new Set(['activity_log', 'cost_entries', 'operation_inputs', 'sale_lines', 'sale_deductions', 'grading_outputs', 'cycle_batches', 'curing_cycle_checks', 'buyer_deductions', 'contract_fields', 'project_stage_history', 'budget_version_lines'])
-const FINANCE = new Set(['sales', 'sale_payments', 'budgets', 'budget_versions', 'allocation_rules', 'buyers', 'contracts', 'contractors', 'contract_advances', 'contract_obligations', 'contract_settlements'])
+const FINANCE = new Set(['sales', 'sale_payments', 'budgets', 'budget_versions', 'funding_requests', 'funding_events', 'allocation_rules', 'buyers', 'contracts', 'contractors', 'contract_advances', 'contract_obligations', 'contract_settlements'])
 const LABEL: Record<string, string> = {
-  farms: 'farm', seasons: 'season', projects: 'project', budget_versions: 'budget version', blocks: 'block', fields: 'field', inputs: 'input', inventory_transactions: 'stock movement', seedbeds: 'seedbed', operations: 'operation', transplants: 'transplant',
+  farms: 'farm', seasons: 'season', projects: 'project', budget_versions: 'budget version', funding_requests: 'funding request', funding_events: 'funding movement', blocks: 'block', fields: 'field', inputs: 'input', inventory_transactions: 'stock movement', seedbeds: 'seedbed', operations: 'operation', transplants: 'transplant',
   harvest_batches: 'harvest batch', barns: 'barn', curing_cycles: 'curing cycle', curing_logs: 'curing log', storage_units: 'storage unit', contractors: 'contractor', contracts: 'contract',
   contract_advances: 'contract advance', contract_obligations: 'contract obligation', contract_settlements: 'contract settlement', grades: 'grade', grading_lots: 'grading lot', bales: 'bale', sales: 'sale',
   sale_payments: 'sale payment', labour_entries: 'labour entry', budgets: 'budget line', machines: 'machine', machine_logs: 'machine log', allocation_rules: 'allocation rule', weather_records: 'weather record', buyers: 'buyer',
@@ -29,6 +29,8 @@ function describe(db: Db, table: string, r: Row): string {
     case 'inventory_transactions': { const i = db.get<{ name: string; unit: string }>(`SELECT name, unit FROM inputs WHERE id=?`, [r.input_id as string]); return `${r.kind} of ${num(Math.abs(Number(r.qty_delta)))} ${i ? `${i.unit} ${i.name}` : ''}`.trim() }
     case 'sales': return `${r.code}${r.buyer ? ` to ${r.buyer}` : ''} (${r.channel})`
     case 'sale_payments': return `payment of ${num(r.amount)} on ${db.get<{ code: string }>(`SELECT code FROM sales WHERE id=?`, [r.sale_id as string])?.code ?? 'a sale'}`
+    case 'funding_requests': return `${r.funder_name} (${r.status})`
+    case 'funding_events': return `${r.kind}${r.form ? ` (${r.form})` : ''} on ${db.get<{ funder_name: string }>(`SELECT funder_name FROM funding_requests WHERE id=?`, [r.request_id as string])?.funder_name ?? 'a request'}`
     case 'budget_versions': return `version ${r.version_no} (${r.kind})`
     case 'budgets': return `${r.category} budget ${num(r.amount)}`
     case 'allocation_rules': return `${r.category} spread by ${r.basis}`

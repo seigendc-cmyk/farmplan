@@ -45,7 +45,7 @@ describe('Pipeline UI', () => {
     expect((await screen.findAllByText(/Say why you are moving past an unmet requirement/)).length).toBeGreaterThan(0); expect(getProject(useApp.getState().ctx!, listProjects(ctx)[0].id).stage).toBe('budget')
     await u.type(within(dlg).getByLabelText(/Reason/), 'Budget agreed on paper'); await u.click(within(dlg).getByRole('button', { name: 'Override and move to Funding' }))
     await within(dlg).findByText('override'); within(dlg).getByText(/Budget agreed on paper/); expect(listProjects(useApp.getState().ctx!)[0].stage).toBe('funding')
-    within(dlg).getByRole('button', { name: 'Skip Contracted — go to Land and seedbed' })
+    within(dlg).getByText(/Raise a funding request, or mark that no funding is needed/); expect(within(dlg).queryByRole('button', { name: 'Skip Contracted — go to Land and seedbed' })).toBeNull()   // Funding now has its own requirement
     await u.click(within(dlg).getByRole('button', { name: 'Back to Budget' })); await screen.findByText(/Say what was wrong/)   // going back needs a reason
     await u.type(within(dlg).getByLabelText(/Reason/), 'Moved too early'); await u.click(within(dlg).getByRole('button', { name: 'Back to Budget' }))
     await within(dlg).findByText('back'); expect(listProjects(useApp.getState().ctx!)[0].stage).toBe('budget')

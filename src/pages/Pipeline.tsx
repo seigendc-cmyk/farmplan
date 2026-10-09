@@ -49,7 +49,7 @@ function ProjectModal({ p, onClose, canAdvance, canOverride, canEdit, advance, b
         {stages.map((s, i) => <li key={s.id} aria-current={i === idx ? 'step' : undefined}
           className={`text-xs rounded px-2 py-1 border ${i === idx ? 'bg-green-700 text-white border-green-700' : i < idx ? 'bg-green-50 border-green-200 text-green-800' : 'border-gray-200 text-gray-500'}`}>{s.label}{s.optional ? ' (optional)' : ''}</li>)}
       </ol>
-      <p className="text-sm text-gray-600 mb-2">{stages[idx]?.help}</p>
+      <p className="text-sm text-gray-600 mb-2">{stages[idx]?.help}{(p.stage === 'funding' || p.stage === 'contracted') && <> <a className="text-green-800 underline" href="#/funding">Open the Funding screen</a></>}</p>
       {p.next && <p className="text-sm mb-2">{blocked ? <><strong>Before leaving {p.stage_label}:</strong> {p.unmet.join('; ')}.</> : <>Ready to move to <strong>{label(p.next)}</strong>.</>}</p>}
       {canAdvance && <div className="space-y-2 mb-3">
         {(blocked || p.skip_to) && <Label text={blocked ? (canOverride ? 'Reason (needed to move past an unmet requirement)' : 'Reason') : 'Reason (optional)'}><Textarea value={reason} onChange={e => setReason(e.target.value)} /></Label>}
