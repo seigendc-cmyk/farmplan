@@ -22,6 +22,7 @@ Offline-first, multi-tenant tobacco production and contract-farming app. Tauri 2
 - New synced table → DDL, `SYNC_ORDER` (FK order), cloud migration with RLS + audit/stamp triggers, `BOOL_COLS` if it has booleans, and decide `HUB_WRITE_TABLES` / `HUB_NO_READ`.
 - Access to the activity log goes through `accessFilter(ctx)` only. Event sentences never contain prices or pay.
 - The app records what was applied; it never prescribes chemical rates.
+- Operations requirement (owner, Oct 2026, NOT BUILT yet): operations must cover both open-field seedbeds and float tray seedbeds, with a granular operations model so every cost is captured from events (never retyped) and the Brain lookups are built from it. Design and approval come before code; until then the seedbed model is conventional beds only.
 - Postgres gotcha: `INSERT … RETURNING` also needs SELECT rights under RLS.
 - Keep code style: compact, typed, no new dependencies without a reason; tests for every invariant; jsdom UI tests follow `src/ui.buyers.test.tsx` (sql.js wasm mock, `window.confirm = () => true`).
 

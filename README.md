@@ -320,6 +320,7 @@ Apply `supabase/migrations/0001_foundation.sql`, `0002_claim_tenant.sql`, `0003_
 - Grade catalogue and operation types are data/config, not hard-coded structure.
 
 ## Known limits
+- **Float tray seedbeds are not supported yet.** Seedbeds are conventional beds only (length, width, count, area). The owner's requirement to cover both open-field and float tray seedbeds, with a granular operations model for full costing and the Brain, is recorded in `docs/NEXT_PHASES.md` and is not designed or built.
 - Conflict policy is last-writer-wins per row (device clocks matter). Custom roles/users are local; cloud member management comes with sharing.
 - Contractor / extension invitations: database layer and RLS are done and tested; the invite/accept UI is Phase 3.
 - Tauri packaging config is included but was not compiled in the build sandbox (no Rust toolchain).
