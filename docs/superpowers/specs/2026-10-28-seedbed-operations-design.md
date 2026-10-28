@@ -1,6 +1,6 @@
 # Seedbed operations: open beds and float tray bays, granular costing, Brain lookups
 
-Status: DRAFT v2 for owner review (owner answers of 28 Oct 2026 folded in). Nothing here is built. Source: owner requirement (Oct 2026) recorded in CLAUDE.md and docs/NEXT_PHASES.md.
+Status: DRAFT v3 for owner review (owner answers of 28 Oct 2026 folded in; Seedbed is its own module). Nothing here is built. Source: owner requirement (Oct 2026) recorded in CLAUDE.md and docs/NEXT_PHASES.md.
 
 ## Intent (as understood)
 Operations in the tobacco workflow must cover both open-field seedbeds and float tray seedbeds. A granular operations model must capture every cost from events (never retyped) and the Brain lookups must be built from it. Owner decisions so far:
@@ -14,6 +14,14 @@ Operations in the tobacco workflow must cover both open-field seedbeds and float
 - `recordTransplant` (`src/services/transplants.ts`) moves seedlings seedbed -> field, requires `actual_seedlings`, caps at what remains, and records only transplant labour as a cost.
 - **Seedbed costs are not attributed to fields anywhere today** (no match for seedbed/seedling in `allocation.ts` or `analytics.ts`). Field cost reports therefore exclude seedbed spend.
 - No trays, cells, float bay, float-water inputs or tray operations exist.
+
+## Enterprise control: Seedbed is its own module (owner decision, 28 Oct 2026)
+Seedbed and float tray operations belong to a separate **Seedbed enterprise**, switched on per farm like Tobacco or Horticulture (module id `seedbed`, added to `src/modules/registry.ts`; module id equals `seasons.enterprise`). Consequences, checked against the code:
+- **Own seasons, project and budget.** A seedbed season (`enterprise = 'seedbed'`) holds the seedbeds, bays, trays, operations and costs, with its own pipeline stages (list to be agreed) and budget. The "one project per season" and funding rules apply unchanged.
+- **Cross-module transplant.** Today `transplants.season_id` is the seedbed's season and `recordTransplant` checks `assertSeasonOpen(sb.season_id)`. With separate enterprises a transplant links a seedbed in a seedbed season to a field in a **crop season** (e.g. tobacco). It needs a separate receiving season (`crop_season_id`), and both seasons must be open.
+- **Costs stay in the Seedbed season** as its spend. The crop season's field receives the attributed seedling cost at transplant (included in the field cost total, per the owner's decision). This is an **internal transfer at cost**; farm-level consolidated totals must not count it twice (see Open decisions).
+- **Menu and permissions.** Seedbed screens appear only when the module is on and the person holds the permission, following the module switch and role menu rules already used for Tobacco.
+- **Tobacco without the Seedbed module.** Farms that do not switch the module on must keep working exactly as today (seedbeds inside the tobacco season). Whether existing seedbeds move is an open decision.
 
 ## Design
 1. **Kinds.** `seedbeds.kind` = `open_bed` (default, all existing rows) | `float_bay`. A float bay is the pond/bay and carries shared costs.
@@ -51,8 +59,11 @@ Service tests for the split (including pending, rounding that sums exactly, zero
 3. Cost per seedling is shown at all levels, with access driven by role and menu permissions.
 
 ## Still open
-- Starter tray types to ship as editable suggestions (names and cells only; the owner can edit all).
-- Whether a separate seedbed-cost menu permission is wanted, or `finance.cost.view` is enough.
+1. **Existing tobacco seedbeds.** Option A: leave them in their tobacco seasons and keep today's behavior for farms without the Seedbed module (two modes). Option B: migrate them into a seedbed season per tobacco season when the module is enabled. A is safer; B is cleaner.
+2. **Internal transfer accounting.** Recommended: the Seedbed enterprise's output is valued at cost; the crop field cost includes it; consolidated farm reports exclude the transfer so spend is counted once.
+3. **Seedbed pipeline stages** (e.g. Idea, Planning, Budget, Funding, Sowing, Growing, Hardening, Dispatched, Closed) to be agreed.
+4. Starter tray types to ship as editable suggestions.
+5. Whether a separate seedbed-cost menu permission is wanted, or `finance.cost.view` is enough.
 
 ## Not in scope
 Pack shed, Horticulture and Orchards seedbeds; any chemical rate advice; changing how existing tobacco season totals are computed.
