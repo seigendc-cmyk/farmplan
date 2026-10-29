@@ -110,10 +110,18 @@ export const CATALOGUE: Question[] = [
   { id: 'cost_per_seedling', title: 'Cost per seedling', about: 'Cost of one seedling for each tray of a float bay or each open bed in a season, or pending when there is cost but no seedling count yet', keywords: ['+cost per seedling', '+per seedling', '+seedling cost', '+cost of a seedling', '+cost of one seedling', '+each seedling cost', '+cost each seedling'],
     params: [{ name: 'season', type: 'season', optional: true, about: 'Season label; defaults to the active season' }], sources: [{ kind: 'view', ref: 'seedbed costs' }], perms: ['finance.cost.view', 'production.seedbed.view'],
     run: (c, p) => unitRows(c, p).map(({ seedbed, unit, u }) => ({ seedbed, unit, per_seedling: u.pending ? 'pending' : u.per_seedling })) },
-  { id: 'tray_survival', title: 'Tray survival', about: 'For each float bay tray in a season: sowing date, seedlings counted, seedlings transplanted so far and, once the tray is depleted or abandoned, the share of seedlings that were never transplanted (mortality)', keywords: ['+tray', '+trays', '+survival', '+survived', '+mortality', '+died', '+dead'],
+  { id: 'tray_survival', title: 'Tray germination and survival', about: 'For each float bay tray in a season: sowing date, expected and counted seedlings, germination (counted over expected), seedlings transplanted, how many of those died at transplanting, the share established, and for depleted or abandoned trays the share of counted seedlings never transplanted', keywords: ['+tray', '+trays', '+survival', '+survived', '+mortality', '+died', '+dead'],
     params: [{ name: 'season', type: 'season', optional: true, about: 'Season label; defaults to the active season' }], sources: [{ kind: 'view', ref: 'seedbed trays' }], perms: ['production.seedbed.view'],
-    run: (c, p) => listSeedbeds(c, seasonIdOf(c, p)).filter(b => b.kind === 'float_bay').flatMap(b => listTrays(c, b.id).map(t => ({ seedbed: b.code, tray: t.code, sown: t.sown_on, actual: t.actual_seedlings, transplanted: t.transplanted, status: t.status,
-      mortality_pct: (t.status === 'depleted' || t.status === 'abandoned') && t.actual_seedlings ? Math.round(Math.max(0, t.actual_seedlings - t.transplanted) / t.actual_seedlings * 1000) / 10 : null }))) },
+    run: (c, p) => { const pct = (n: number, d: number | null) => d ? Math.round(n / d * 1000) / 10 : null
+      return listSeedbeds(c, seasonIdOf(c, p)).filter(b => b.kind === 'float_bay').flatMap(b => listTrays(c, b.id).map(t => {
+        // transplants.mortality is part of qty (established = qty - mortality), summed over this tray's live transplants only.
+        const died = c.db.get<{ n: number }>(`SELECT COALESCE(SUM(mortality),0) n FROM transplants WHERE farm_id=? AND tray_id=? AND deleted_at IS NULL`, [c.farmId, t.id])!.n
+        const closed = t.status === 'depleted' || t.status === 'abandoned'
+        return { seedbed: b.code, tray: t.code, sown: t.sown_on, expected: t.expected_seedlings, actual: t.actual_seedlings,
+          germination_pct: t.actual_seedlings != null ? pct(t.actual_seedlings, t.expected_seedlings) : null, transplanted: t.transplanted, died_at_transplant: died,
+          survival_pct: t.transplanted ? pct(t.transplanted - died, t.transplanted) : null,
+          unplanted_pct: closed && t.actual_seedlings ? pct(Math.max(0, t.actual_seedlings - t.transplanted), t.actual_seedlings) : null }
+      })) } },
   { id: 'bay_operations', title: 'Float bay operations', about: 'Work done in the float bay (filling, seeding, water top-ups, clipping, hardening, cleaning) with date, type and tray; latest first, optionally only the last few days. No prices.', keywords: ['+float bay', '+float water', '+float bays', 'in the bay', 'tray filling', 'top up', 'topped up'],
     params: [{ name: 'season', type: 'season', optional: true, about: 'Season label; defaults to the active season' }, { name: 'days', type: 'number', optional: true, about: 'How many days back; default the whole season' }], sources: [{ kind: 'view', ref: 'operations' }], perms: ['production.operation.view', 'production.seedbed.view'],
     run: (c, p) => { const sid = seasonIdOf(c, p); const from = p.days ? new Date(Date.now() - Number(p.days) * 864e5).toISOString().slice(0, 10) : ''

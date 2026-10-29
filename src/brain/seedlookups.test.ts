@@ -11,7 +11,7 @@ import { recordTransplant } from '../services/transplants'
 import { recordOperation } from '../services/operations'
 import { createRole } from '../services/roles'
 import { askBrain, DEFAULT_BRAIN, type BrainSettings } from './ask'
-import { availableQuestions } from './catalogue'
+import { availableQuestions, CATALOGUE, resolveParams } from './catalogue'
 
 const d = (days: number) => new Date(Date.now() + days * 864e5).toISOString().slice(0, 10)
 const rules: BrainSettings = { ...DEFAULT_BRAIN, engine: 'rules' }
@@ -58,6 +58,7 @@ describe('seedbed cost lookups', () => {
     expect(ids).toEqual(expect.arrayContaining(['tray_survival', 'bay_operations', 'seedbeds_status'])); expect(ids).not.toContain('seedbed_cost'); expect(ids).not.toContain('cost_per_seedling')
     const c = await ask(m, 'how much have the seedbeds cost'); expect(c.id).not.toBe('seedbed_cost'); expect(c.rows.every(r => !('cost' in r) && !('per_seedling' in r))).toBe(true)
     expect((await ask(m, 'which tray had the best germination')).id).toBe('tray_survival')
+    for (const q of ['how much have the seedbeds cost', 'cost per seedling in the float bay']) { const r = await ask(m, q); expect(`${r.sentence} ${r.notes.join(' ')} ${r.suggestions.join(' ')}`).not.toMatch(/cost|per seedling|300|\b50\b/i) }
   })
   it('season param: an earlier season answers with its own beds', async () => {
     const s0 = createSeason(o, { label: '2025/26', starts_on: d(-500), ends_on: d(-300) }); const b0 = createSeedbed(o, { season_id: s0, code: 'OLD', bed_length_m: 2, bed_width_m: 1, bed_count: 1, actual_seedlings: 10 })
@@ -67,13 +68,17 @@ describe('seedbed cost lookups', () => {
 })
 
 describe('tray_survival and bay_operations', () => {
-  it('shows sown / actual / transplanted per tray; mortality only once a tray is depleted or abandoned', async () => {
-    recordTransplant(o, { seedbed_id: bay, tray_id: t1, field_id: field, season_id: season, crop_season_id: season, qty: 80, occurred_on: d(-10) } as never)
+  it('tray_survival: germination, deaths recorded at transplanting (inside qty), established share; unplanted share only for depleted or abandoned trays', async () => {
+    recordTransplant(o, { seedbed_id: bay, tray_id: t1, field_id: field, season_id: season, crop_season_id: season, qty: 80, mortality: 5, occurred_on: d(-10) } as never)
     let a = await ask(o, 'which tray had the best germination'); expect(a.id).toBe('tray_survival')
-    expect(a.rows).toEqual([{ seedbed: 'BAY1', tray: 'T-001', sown: d(-60), actual: 100, transplanted: 80, status: 'sown', mortality_pct: null }, { seedbed: 'BAY1', tray: 'T-002', sown: d(-50), actual: 200, transplanted: 0, status: 'sown', mortality_pct: null }])
+    expect(a.rows).toEqual([
+      { seedbed: 'BAY1', tray: 'T-001', sown: d(-60), expected: 120, actual: 100, germination_pct: 83.3, transplanted: 80, died_at_transplant: 5, survival_pct: 93.8, unplanted_pct: null },
+      { seedbed: 'BAY1', tray: 'T-002', sown: d(-50), expected: 200, actual: 200, germination_pct: 100, transplanted: 0, died_at_transplant: 0, survival_pct: null, unplanted_pct: null }])
     updateTray(o, t1, { status: 'depleted' }); updateTray(o, t2, { status: 'abandoned' })
     a = await ask(o, 'how many seedlings died in each tray')
-    expect(a.id).toBe('tray_survival'); expect(a.rows.map(r => [r.tray, r.mortality_pct])).toEqual([['T-001', 20], ['T-002', 100]])
+    expect(a.rows.map(r => [r.tray, r.unplanted_pct, r.survival_pct])).toEqual([['T-001', 20, 93.8], ['T-002', 100, null]])
+    db.softDelete('transplants', db.get<{ id: string }>(`SELECT id FROM transplants`)!.id)   // a deleted transplant no longer counts
+    a = await ask(o, 'survival rate by tray'); expect(a.rows[0]).toMatchObject({ transplanted: 0, died_at_transplant: 0, survival_pct: null })
   })
   it('bay_operations: date, type and tray only, no prices, bay (float) beds only', async () => {
     recordOperation(o, { target: { type: 'seedbed', id: bay, tray_id: t1 }, op_type: 'Tray filling', occurred_on: d(-3), workers: [{ worker_name: 'Tendai', hours: 2, pay: 40 }] })
@@ -85,6 +90,14 @@ describe('tray_survival and bay_operations', () => {
     expect(Object.keys(a.rows[0])).toEqual(['date', 'type', 'tray']); expect(JSON.stringify(a.rows)).not.toMatch(/40|cost|pay/i)
     const old = recordOperation(o, { target: { type: 'seedbed', id: bay }, op_type: 'Tray cleaning', occurred_on: d(-30) }); expect(old).toBeTruthy()
     expect((await ask(o, 'float bay operations')).rows).toHaveLength(3)
+  })
+  it('bay_operations days boundary and the 30-row cap', async () => {
+    const op = (on: string) => recordOperation(o, { target: { type: 'seedbed', id: bay }, op_type: 'Float water top-up', occurred_on: on })
+    op(d(-1)); op(d(-2))
+    expect((await ask(o, 'what was done in the float bay yesterday')).rows.map(r => r.date)).toEqual([d(-1)])
+    expect(() => resolveParams(o, CATALOGUE.find(q => q.id === 'bay_operations')!, { days: 0 })).toThrow(/between 1 and 365/)
+    for (let i = 0; i < 35; i++) op(d(-3 - (i % 20)))
+    expect((await ask(o, 'float bay operations')).rows).toHaveLength(30)
   })
   it('bay_operations needs both operation and seedbed view', async () => {
     const m = await user('Seedonly', ['brain.chat.ask', 'production.seedbed.view'])
