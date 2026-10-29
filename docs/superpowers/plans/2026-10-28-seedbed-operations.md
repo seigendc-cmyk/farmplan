@@ -20,6 +20,11 @@
 - Before any "done": `npx tsc --noEmit`, `npx vitest run`, `node tests/migration.test.mjs`, `npm run build` all pass.
 - Report evidence per CLAUDE.md protocol (VERIFIED / UNVERIFIED), never claim beyond what was run.
 
+## Owner instructions for execution (29 Oct 2026)
+- **Test before wiring:** in every task the service logic and its tests must pass before any UI is written; the UI step then wires to that tested service and gets its own jsdom test. Do not start a UI step while the service tests fail.
+- **Module docs:** `docs/modules/tobacco.md` and `docs/modules/seedbed.md` are written in Task 12, one per built module, each stating only what was built and verified.
+- **Scope:** float tray seedbeds are delivered through the Seedbed module, used by tobacco (approved spec). Tobacco's existing seedbeds stay untouched.
+
 ## Review Focus
 - A float bay whose trays all have zero or unset `actual_seedlings`: cost split must return pending (null per seedling), never divide by zero or show 0.
 - `actual_seedlings` edited after costs were recorded or after a transplant: splits recompute; a count below what was already transplanted is refused.
@@ -191,3 +196,12 @@ Note: `seasonComparison` is per season and no consolidated cross-season farm rep
 - [ ] **Step 2: Browser walk-through** with the existing Playwright setup (`/tmp/claude-0/pw`, dev server `npm run dev -- --host 127.0.0.1`, stop with `pkill -f '[v]ite --host'`): at 1280 and 390 px, switch on Seedbed module, create a seedbed season, add a tray type, a float bay with two trays, record a float water top-up with an input, enter counts, transplant into a tobacco field, open Profitability and Fields, ask the Brain "cost per seedling". Check console errors and review screenshots.
 - [ ] **Step 3:** Run `npx tsc --noEmit`, `npx vitest run`, `node tests/migration.test.mjs`, `npm run build`.
 - [ ] **Step 4:** Commit `docs: seedbed module`, push `seedbed-module`, set tracking, and send the evidence report (Inspected, Changed, UI wiring per interaction, Tested, Visually verified, Not verified, Assumptions, Risks).
+
+### Task 12: Module documentation
+
+**Files:** Create `docs/modules/tobacco.md`, `docs/modules/seedbed.md`; Modify CLAUDE.md (the Docs line lists `docs/modules/`).
+
+Each file has the same sections: Purpose, Screens (route, permission, what each does), Data (tables and key columns), Rules and calculations (including the seedling cost split and the legacy behavior), Costs, Permissions, Brain lookups, Tests (file names and what they pin), Known limits, Not verified. Tobacco's file describes the whole tobacco workflow as built (seedbeds, operations, transplanting, harvest, curing, grading, marketing, contracts, funding, pipeline) and how it receives seedlings from the Seedbed module. Claims are checked against the code and tests, not written from memory.
+
+- [ ] **Step 1:** Write both files from the final code; verify every file path, route and function name mentioned exists (`grep`).
+- [ ] **Step 2:** Run the four verification commands; commit `docs: module guides for tobacco and seedbed`.
