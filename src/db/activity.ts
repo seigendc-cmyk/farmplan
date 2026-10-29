@@ -9,7 +9,7 @@ export interface ActivityEvent { kind: EventKind; verb: string; domain: Domain; 
 export const NOT_LOGGED = new Set(['activity_log', 'cost_entries', 'operation_inputs', 'sale_lines', 'sale_deductions', 'grading_outputs', 'cycle_batches', 'curing_cycle_checks', 'buyer_deductions', 'contract_fields', 'project_stage_history', 'budget_version_lines'])
 const FINANCE = new Set(['sales', 'sale_payments', 'budgets', 'budget_versions', 'funding_requests', 'funding_events', 'allocation_rules', 'buyers', 'contracts', 'contractors', 'contract_advances', 'contract_obligations', 'contract_settlements'])
 const LABEL: Record<string, string> = {
-  farms: 'farm', seasons: 'season', projects: 'project', budget_versions: 'budget version', funding_requests: 'funding request', funding_events: 'funding movement', blocks: 'block', fields: 'field', inputs: 'input', inventory_transactions: 'stock movement', seedbeds: 'seedbed', operations: 'operation', transplants: 'transplant',
+  farms: 'farm', seasons: 'season', projects: 'project', budget_versions: 'budget version', funding_requests: 'funding request', funding_events: 'funding movement', blocks: 'block', fields: 'field', inputs: 'input', inventory_transactions: 'stock movement', seedbeds: 'seedbed', tray_types: 'tray type', seedbed_trays: 'tray', operations: 'operation', transplants: 'transplant',
   harvest_batches: 'harvest batch', barns: 'barn', curing_cycles: 'curing cycle', curing_logs: 'curing log', storage_units: 'storage unit', contractors: 'contractor', contracts: 'contract',
   contract_advances: 'contract advance', contract_obligations: 'contract obligation', contract_settlements: 'contract settlement', grades: 'grade', grading_lots: 'grading lot', bales: 'bale', sales: 'sale',
   sale_payments: 'sale payment', labour_entries: 'labour entry', budgets: 'budget line', machines: 'machine', machine_logs: 'machine log', allocation_rules: 'allocation rule', weather_records: 'weather record', buyers: 'buyer',
@@ -36,6 +36,8 @@ function describe(db: Db, table: string, r: Row): string {
     case 'allocation_rules': return `${r.category} spread by ${r.basis}`
     case 'bales': return `${r.code} (${num(r.weight_kg)} kg)`
     case 'fields': return `${r.field_no} (${num(r.area_ha)} ha)`
+    case 'seedbed_trays': return `${r.code}`
+    case 'tray_types': return `${r.name} (${num(r.cells)} cells)`
     case 'curing_cycles': case 'storage_units': case 'grading_lots': case 'seedbeds': return `${r.code}`
     default: return String(r.code ?? r.name ?? r.field_no ?? r.label ?? r.category ?? String(r.id).slice(0, 8))
   }

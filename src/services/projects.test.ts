@@ -126,7 +126,7 @@ describe('existing data', () => {
     expect(by).toEqual({ '2026/27': 'planning', Grow: 'growing', Sold: 'grading_marketing', Done: 'closed', Budgeted: 'budget' })
     expect(projectHistory(u, listProjects(u)[0].id)[0]).toMatchObject({ kind: 'create' })
     expect(up.all(`SELECT * FROM cost_entries`)).toHaveLength(before)
-    expect(up.get<{ value: string }>(`SELECT value FROM meta WHERE key='schema_version'`)!.value).toBe('18')
+    expect(up.get<{ value: string }>(`SELECT value FROM meta WHERE key='schema_version'`)!.value).toBe('19')
     expect(up.all(`SELECT 1 FROM role_permissions rp JOIN roles r ON r.id=rp.role_id WHERE r.name='Farm Manager' AND rp.permission='projects.stage.advance'`)).toHaveLength(1)
     const again = up.all(`SELECT 1 FROM projects`).length; const { backfillProjects } = await import('../db/projectlink'); backfillProjects(up); expect(up.all(`SELECT 1 FROM projects`)).toHaveLength(again)   // running it twice adds nothing
   })

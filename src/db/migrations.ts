@@ -10,6 +10,12 @@ import { PHASE10_GRANTS, PHASE11_GRANTS, PHASE12_GRANTS, PHASE13_GRANTS, PHASE14
 export function runMigrations(db: Db, from: number) {
   if (from < 9) hubReindex(db)
   db.tx(() => {
+    if (from < 19) {   // Seedbed module: float tray bays. New tables come from DDL; the kind of a seedbed, the tray links and the crop season on a transplant are added in place. Existing seedbeds stay open beds.
+      const add = (table: string, col: string, ddl: string) => { const cols = db.all<{ name: string }>(`PRAGMA table_info(${table})`).map(c => c.name); if (cols.length && !cols.includes(col)) db.run(`ALTER TABLE ${table} ADD COLUMN ${col} ${ddl}`) }
+      add('seedbeds', 'kind', `TEXT NOT NULL DEFAULT 'open_bed' CHECK (kind IN ('open_bed','float_bay'))`)
+      add('operations', 'tray_id', 'TEXT REFERENCES seedbed_trays(id)'); add('cost_entries', 'tray_id', 'TEXT REFERENCES seedbed_trays(id)')
+      add('transplants', 'tray_id', 'TEXT REFERENCES seedbed_trays(id)'); add('transplants', 'crop_season_id', 'TEXT REFERENCES seasons(id)')
+    }
     if (from < 18) {   // Platform step 3: funding. The link to a contractor and contract, and the two flags, live on the project; Farm Managers get the funding rights once.
       const add = (table: string, col: string, ddl: string) => { const cols = db.all<{ name: string }>(`PRAGMA table_info(${table})`).map(c => c.name); if (cols.length && !cols.includes(col)) db.run(`ALTER TABLE ${table} ADD COLUMN ${col} ${ddl}`) }
       add('projects', 'contractor_id', 'TEXT REFERENCES contractors(id)'); add('projects', 'contract_id', 'TEXT REFERENCES contracts(id)')

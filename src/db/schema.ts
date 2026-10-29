@@ -1,5 +1,5 @@
 // Local SQLite schema. Mirrors supabase/migrations/0001_foundation.sql so rows sync 1:1.
-export const SCHEMA_VERSION = 18
+export const SCHEMA_VERSION = 19
 
 const common = `
   created_at TEXT NOT NULL DEFAULT (datetime('now')),
@@ -68,8 +68,23 @@ CREATE TABLE IF NOT EXISTS seedbeds (
   bed_count INTEGER NOT NULL DEFAULT 1 CHECK (bed_count > 0), area_m2 REAL, prepared_on TEXT, sown_on TEXT,
   expected_seedlings INTEGER CHECK (expected_seedlings >= 0), actual_seedlings INTEGER CHECK (actual_seedlings >= 0),
   status TEXT NOT NULL DEFAULT 'prepared'
-    CHECK (status IN ('prepared','sown','germinating','growing','hardening','ready','depleted','abandoned')), ${common},
+    CHECK (status IN ('prepared','sown','germinating','growing','hardening','ready','depleted','abandoned')),
+  kind TEXT NOT NULL DEFAULT 'open_bed' CHECK (kind IN ('open_bed','float_bay')), ${common},
   UNIQUE (tenant_id, season_id, code));
+
+-- ---- Seedbed module (v19): float tray bays. A tray type is a farm's catalogue entry; a tray is one sown tray in a bay. Neither carries money. ----
+CREATE TABLE IF NOT EXISTS tray_types (
+  id TEXT PRIMARY KEY, tenant_id TEXT NOT NULL, farm_id TEXT NOT NULL REFERENCES farms(id),
+  name TEXT NOT NULL, cells INTEGER NOT NULL CHECK (cells > 0), length_mm REAL, width_mm REAL, media TEXT, note TEXT, ${common},
+  UNIQUE (tenant_id, farm_id, name));
+CREATE TABLE IF NOT EXISTS seedbed_trays (
+  id TEXT PRIMARY KEY, tenant_id TEXT NOT NULL, farm_id TEXT NOT NULL REFERENCES farms(id),
+  seedbed_id TEXT NOT NULL REFERENCES seedbeds(id), tray_type_id TEXT NOT NULL REFERENCES tray_types(id),
+  code TEXT NOT NULL, variety TEXT, sown_on TEXT,
+  expected_seedlings INTEGER CHECK (expected_seedlings >= 0), actual_seedlings INTEGER CHECK (actual_seedlings >= 0),
+  status TEXT NOT NULL DEFAULT 'sown'
+    CHECK (status IN ('sown','germinating','growing','hardening','ready','depleted','abandoned')), ${common},
+  UNIQUE (tenant_id, seedbed_id, code));
 
 CREATE TABLE IF NOT EXISTS operations (
   id TEXT PRIMARY KEY, tenant_id TEXT NOT NULL, farm_id TEXT NOT NULL REFERENCES farms(id),
@@ -79,7 +94,8 @@ CREATE TABLE IF NOT EXISTS operations (
   op_type TEXT NOT NULL, phase TEXT NOT NULL DEFAULT 'field' CHECK (phase IN ('seedbed','land_prep','field')),
   occurred_on TEXT NOT NULL, area_ha REAL, labour_workers INTEGER, labour_hours REAL,
   labour_cost REAL NOT NULL DEFAULT 0, machinery_asset TEXT, machinery_hours REAL, machinery_fuel_l REAL,
-  machinery_cost REAL NOT NULL DEFAULT 0, operator TEXT, weather TEXT, remarks TEXT, created_by TEXT, ${common},
+  machinery_cost REAL NOT NULL DEFAULT 0, operator TEXT, weather TEXT, remarks TEXT, created_by TEXT,
+  tray_id TEXT REFERENCES seedbed_trays(id), ${common},
   CHECK ((target_type = 'seedbed' AND seedbed_id IS NOT NULL AND field_id IS NULL)
       OR (target_type = 'field' AND field_id IS NOT NULL AND seedbed_id IS NULL)));
 CREATE INDEX IF NOT EXISTS ix_ops_season ON operations(season_id, occurred_on) WHERE deleted_at IS NULL;
@@ -96,7 +112,7 @@ CREATE TABLE IF NOT EXISTS cost_entries (
     'transport','curing','storage','grading','baling','marketing','overhead')),
   amount REAL NOT NULL, occurred_on TEXT NOT NULL, seedbed_id TEXT REFERENCES seedbeds(id),
   field_id TEXT REFERENCES fields(id), source_type TEXT NOT NULL, source_id TEXT, note TEXT,
-  cycle_id TEXT, ${common});
+  cycle_id TEXT, tray_id TEXT REFERENCES seedbed_trays(id), ${common});
 CREATE INDEX IF NOT EXISTS ix_cost_season ON cost_entries(season_id) WHERE deleted_at IS NULL;
 
 CREATE TABLE IF NOT EXISTS weather_records (
@@ -112,7 +128,8 @@ CREATE TABLE IF NOT EXISTS transplants (
   field_id TEXT NOT NULL REFERENCES fields(id), kind TEXT NOT NULL DEFAULT 'transplant' CHECK (kind IN ('transplant','gap_fill')),
   occurred_on TEXT NOT NULL, qty INTEGER NOT NULL CHECK (qty > 0), mortality INTEGER NOT NULL DEFAULT 0 CHECK (mortality >= 0),
   spacing_row_m REAL, spacing_plant_m REAL, labour_workers INTEGER, labour_cost REAL NOT NULL DEFAULT 0,
-  weather TEXT, soil_condition TEXT, remarks TEXT, created_by TEXT, ${common});
+  weather TEXT, soil_condition TEXT, remarks TEXT, created_by TEXT,
+  tray_id TEXT REFERENCES seedbed_trays(id), crop_season_id TEXT REFERENCES seasons(id), ${common});
 CREATE INDEX IF NOT EXISTS ix_tp_seedbed ON transplants(seedbed_id) WHERE deleted_at IS NULL;
 
 CREATE TABLE IF NOT EXISTS harvest_batches (
