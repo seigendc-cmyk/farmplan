@@ -20,6 +20,9 @@ function baySummary(st?: string[]): string | null {
   return `${st.length} tray${st.length === 1 ? '' : 's'}: ${kinds.length === 1 ? kinds[0] : kinds.map(x => `${n(x)} ${x}`).join(', ')}`
 }
 
+/** The summary badge follows the trays, never the stored bay status: all ready = green, all depleted or abandoned = gray, otherwise blue. */
+const summaryTone = (st: string[]) => (st.every(x => x === 'ready') ? 'green' : st.every(x => x === 'depleted' || x === 'abandoned') ? 'gray' : 'blue') as 'green' | 'gray' | 'blue'
+
 export default function Seedbeds() {
   const ctx = useCtx(); const can = useCan(); const run = useRun()
   const allSeasons = useData(c => listSeasons(c)) ?? []; const module = useData(c => currentModule(c)) ?? 'tobacco'
@@ -70,7 +73,7 @@ export default function Seedbeds() {
             <Td>{fmt.date(r.sown_on)}</Td><Td right>{fmt.num(r.expected_seedlings)}</Td><Td right>{fmt.num(r.actual_seedlings)}</Td>
             <Td right>{r.achievement_pct == null ? '—' : `${r.achievement_pct}%`}</Td>
             {showCost && <><Td right>{fmt.money(r.total_cost)}</Td><Td right>{fmt.money(r.cost_per_1000_seedlings)}</Td></>}
-            <Td className="whitespace-nowrap"><Badge tone={statusTone(r.status)}>{r.kind === 'float_bay' ? baySummary(bayTrays[r.id]) ?? r.status : r.status}</Badge></Td>
+            <Td className="whitespace-nowrap">{r.kind === 'float_bay' && bayTrays[r.id]?.length ? <Badge tone={summaryTone(bayTrays[r.id])}>{baySummary(bayTrays[r.id])}</Badge> : <Badge tone={statusTone(r.status)}>{r.status}</Badge>}</Td>
             <Td className="text-right space-x-1 whitespace-nowrap">
               <Button small variant="ghost" onClick={() => setDiary(r)}>Diary</Button>
               {r.kind === 'float_bay' && <Button small aria-label={`Trays ${r.code}`} onClick={() => setBayId(r.id)}>Trays</Button>}

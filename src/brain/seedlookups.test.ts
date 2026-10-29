@@ -26,7 +26,8 @@ beforeEach(async () => {
   db = await Db.open(new MemoryPersistence())
   await initialiseFarm(db, { tenantName: 'T', farmName: 'F', ownerName: 'Lovemore', ownerPin: '1234' })
   o = { db, ...(await login(db, 'Lovemore', '1234')).ctx! }
-  season = createSeason(o, { label: '2026/27', starts_on: d(-90), ends_on: d(270), activate: true })
+  db.update('farms', o.farmId, { modules: 'tobacco,seedbed' })   // seedbed lookups read the seedbed module's own season (walk-through fix round 1)
+  season = createSeason(o, { label: '2026/27', starts_on: d(-90), ends_on: d(270), activate: true, enterprise: 'seedbed' })
   field = createField(o, { field_no: 'F-04', area_ha: 4 })
   bay = createSeedbed(o, { season_id: season, code: 'BAY1', kind: 'float_bay' })
   open = createSeedbed(o, { season_id: season, code: 'OB1', bed_length_m: 10, bed_width_m: 1, bed_count: 1, actual_seedlings: 100 })
@@ -69,7 +70,7 @@ describe('seedbed cost lookups', () => {
 
 describe('tray_survival and bay_operations', () => {
   it('tray_survival: germination, deaths recorded at transplanting (inside qty), established share; unplanted share only for depleted or abandoned trays', async () => {
-    recordTransplant(o, { seedbed_id: bay, tray_id: t1, field_id: field, season_id: season, crop_season_id: season, qty: 80, mortality: 5, occurred_on: d(-10) } as never)
+    recordTransplant(o, { seedbed_id: bay, tray_id: t1, field_id: field, season_id: season, crop_season_id: createSeason(o, { label: 'CROP 1', starts_on: d(-90), ends_on: d(270), enterprise: 'tobacco' }), qty: 80, mortality: 5, occurred_on: d(-10) } as never)
     let a = await ask(o, 'which tray had the best germination'); expect(a.id).toBe('tray_survival')
     expect(a.rows).toEqual([
       { seedbed: 'BAY1', tray: 'T-001', sown: d(-60), expected: 120, actual: 100, germination_pct: 83.3, transplanted: 80, died_at_transplant: 5, survival_pct: 93.8, unplanted_pct: null },

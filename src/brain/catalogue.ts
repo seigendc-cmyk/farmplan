@@ -161,7 +161,9 @@ export function resolveParams(ctx: Ctx, q: Question, raw: RawParams = {}): Resol
   for (const d of q.params) {
     let v = raw[d.name]; if (typeof v === 'string') v = v.trim()
     if (v == null || v === '') {
-      if (d.type === 'season') { const all = seasonLabels(ctx); const s = (q.module ? moduleDefaultSeason(ctx, q.module) : undefined) ?? all.find(x => x.status === 'active') ?? all[0]; need(s, 'There is no season yet'); out[d.name] = s.label; continue }
+      if (d.type === 'season') { const all = seasonLabels(ctx); // A module lookup never falls back to another module's season: with no active season of its own it says so (the answer is empty, not a legacy tobacco row).
+        if (q.module) { const m = moduleDefaultSeason(ctx, q.module); need(m, `No active ${q.module} season yet — create one in the ${q.module[0].toUpperCase()}${q.module.slice(1)} module`); out[d.name] = m.label; continue }
+        const s = all.find(x => x.status === 'active') ?? all[0]; need(s, 'There is no season yet'); out[d.name] = s.label; continue }
       need(d.optional, `Missing: ${d.about}`); continue
     }
     switch (d.type) {

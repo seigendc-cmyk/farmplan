@@ -8,7 +8,7 @@ import { saveTrayType } from '../services/traytypes'
 import { createTray } from '../services/trays'
 import { askBrain, DEFAULT_BRAIN, type BrainSettings } from './ask'
 import { cellText, templateSentence } from './catalogue'
-import { extractParams } from './engine'
+import { extractParams, numbersGrounded } from './engine'
 
 const d = (days: number) => new Date(Date.now() + days * 864e5).toISOString().slice(0, 10)
 const rules: BrainSettings = { ...DEFAULT_BRAIN, engine: 'rules' }
@@ -34,8 +34,16 @@ describe('seedbed lookups default to the seedbed module season (D1)', () => {
     it(`${id}: no season named -> SB 2026`, async () => { const a = await ask(q); expect(a.id).toBe(id); expect(a.params.season).toBe('SB 2026') })
   it('rows come back for the headline question', async () => { const a = await ask('cost per seedling in the float bay'); expect(a.rows).toEqual([{ seedbed: 'BAY-001', unit: 'T-001', per_seedling: 0.0556 }]) })
   it('other lookups keep the newest active season of any module', async () => { expect((await ask('what did we spend by category')).params.season).toBe('2026/27') })
-  it('a farm with no active seedbed season falls back to the old default', async () => {
-    db.update('seasons', sbSeason, { status: 'closed' }); expect((await ask('cost per seedling in the float bay')).params.season).toBe('2026/27')
+  it('no active seedbed season: no rows, a clear message, no run against the tobacco season, no exception', async () => {
+    db.update('seasons', sbSeason, { status: 'closed' })
+    for (const q of ['cost per seedling in the float bay', 'how much have the seedbeds cost', 'tray survival in the float bay', 'float water top up in the bay']) {
+      const a = await ask(q); expect(a.rows).toEqual([]); expect(a.sentence).toBe('No active seedbed season yet — create one in the Seedbed module')
+    }
+    expect((await ask('what did we spend by category')).params.season).toBe('2026/27')   // other lookups unaffected
+  })
+  it('a farm without the seedbed module says the same', async () => {
+    db.update('seasons', sbSeason, { status: 'closed' }); db.update('farms', o.farmId, { modules: 'tobacco' })
+    const a = await ask('cost per seedling in the float bay'); expect(a.rows).toEqual([]); expect(a.sentence).toMatch(/No active seedbed season yet/)
   })
 })
 
@@ -51,6 +59,22 @@ describe('naming a seedbed season (D4)', () => {
     // same label in both modules: the seedbed lookup reads the seedbed one
     db.update('seasons', sbSeason, { label: '2026/27' })
     const a = await ask('cost per seedling in the float bay for 2026/27'); expect(a.rows).toHaveLength(1)
+  })
+})
+
+describe('season label matching is conservative (D4 hardening)', () => {
+  const x = (question: string, seasons: string[]) => extractParams({ question, spec: [], seasons, fields: [], people: [], today: d(0) }).season
+  it('a numeric label is ignored next to a date or a year pair; a common-word label needs a trigger word', () => {
+    expect(x('harvest on 2026-09-01', ['2026', '2026/27'])).toBeUndefined(); expect(x('harvest in 2026/28', ['2026'])).toBeUndefined(); expect(x('costs in 2026', ['2026'])).toBe('2026')
+    expect(x('main field harvest', ['Main'])).toBeUndefined(); expect(x('costs in Main', ['Main'])).toBe('Main'); expect(x('costs for the main season', ['Main'])).toBe('Main'); expect(x('Main', ['Main'])).toBe('Main')
+    expect(x('cost per seedling in SB 2026', ['SB 2026', '2026/27'])).toBe('SB 2026')
+  })
+})
+
+describe('numbers in a model sentence (D3 hardening)', () => {
+  it('only per_seedling may be quoted beyond 2 decimals', () => {
+    expect(numbersGrounded('costs 0.0566 each', [{ per_seedling: 0.0566 }])).toBe(true)
+    expect(numbersGrounded('costs 12.3456', [{ cost: 12.3456 }])).toBe(false); expect(numbersGrounded('costs 12.35', [{ cost: 12.3456 }])).toBe(true)
   })
 })
 
