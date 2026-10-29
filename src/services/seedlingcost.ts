@@ -1,4 +1,4 @@
-import { type Ctx, require, can, need, round2, round4 } from './context'
+import { type Ctx, require, can, need, round2, round4, isDate } from './context'
 import { splitByWeight } from './allocation'
 
 export interface UnitCost { unit: 'tray' | 'bed'; id: string; code: string; seedlings: number | null; cost: number | null; per_seedling: number | null; pending: boolean }
@@ -17,44 +17,52 @@ function load(ctx: Ctx, seedbedId: string, asOf?: string) {
   return { bed, own, shared }
 }
 
-/** Cost per unit of a bed. Open bed: one 'bed' unit. Float bay: one 'tray' unit per live tray, with bay-level cost split by actual seedlings (splitByWeight, cents sum exactly).
- *  Derived on every call, nothing stored, so a changed tray count recomputes. Without finance.cost.view cost and per_seedling are null (seedlings and pending still shown). */
-export function seedbedUnitCosts(ctx: Ctx, seedbedId: string, asOf?: string): UnitCost[] {
-  require(ctx, 'production.seedbed.view')
-  need(asOf == null || /^\d{4}-\d{2}-\d{2}$/.test(asOf), 'Invalid date')
-  const show = can(ctx, 'finance.cost.view')
+interface Computed { units: UnitCost[]; total: number }
+
+/** Raw (unmasked) units plus the bed's total cost, from one cost query. per_seedling is rounded to 4 dp for display only: callers that need money
+ *  (Task 8 attribution) must multiply from cost / seedlings, or split with splitByWeight, never from the rounded per_seedling. */
+function compute(ctx: Ctx, seedbedId: string, asOf?: string): Computed {
+  need(asOf == null || isDate(asOf), 'Invalid date')
   const { bed, own, shared } = load(ctx, seedbedId, asOf)
-  const mk = (unit: 'tray' | 'bed', id: string, code: string, seedlings: number | null, total: number): UnitCost => {
-    const cost = round2(total)
+  const total = round2([...own.values()].reduce((s, v) => s + v, 0) + shared)
+  const mk = (unit: 'tray' | 'bed', id: string, code: string, seedlings: number | null, amount: number): UnitCost => {
+    const cost = round2(amount)
     const pending = (seedlings == null || seedlings === 0) && cost !== 0
-    return { unit, id, code, seedlings, cost: show ? cost : null, per_seedling: show && !pending && seedlings ? round4(cost / seedlings) : null, pending }
+    return { unit, id, code, seedlings, cost, per_seedling: !pending && seedlings ? round4(cost / seedlings) : null, pending }
   }
-  if (bed.kind !== 'float_bay') return [mk('bed', bed.id, bed.code, bed.actual_seedlings, [...own.values()].reduce((s, v) => s + v, 0) + shared)]
+  if (bed.kind !== 'float_bay') return { units: [mk('bed', bed.id, bed.code, bed.actual_seedlings, total)], total }
   const trays = ctx.db.all<TrayRow>(`SELECT id, code, actual_seedlings FROM seedbed_trays WHERE seedbed_id=? AND farm_id=? AND deleted_at IS NULL ORDER BY code`, [seedbedId, ctx.farmId])
   const weights = trays.map(t => t.actual_seedlings ?? 0)
   const canSplit = weights.some(w => w > 0)
   const parts = canSplit ? splitByWeight(shared, weights) : trays.map(() => 0)
   // Bay cost that cannot be split (no tray has seedlings) leaves every tray pending.
   const stuck = !canSplit && round2(shared) !== 0
-  return trays.map((t, i) => {
+  return { total, units: trays.map((t, i) => {
     const u = mk('tray', t.id, t.code, t.actual_seedlings, (own.get(t.id) ?? 0) + parts[i])
     if (stuck) { u.pending = true; u.per_seedling = null }
     return u
-  })
+  }) }
 }
 
-/** Cost per seedling of the tray (tray_id given) or of the open bed. A float bay without tray_id returns bay total cost (own tray cost plus bay-level) / the bay's seedlings (sum of tray counts). */
+/** Cost per unit of a bed. Open bed: one 'bed' unit. Float bay: one 'tray' unit per live tray, with bay-level cost split by actual seedlings (splitByWeight, cents sum exactly).
+ *  Derived on every call, nothing stored, so a changed tray count recomputes. Without finance.cost.view cost and per_seedling are null (seedlings and the real pending flag still shown). */
+export function seedbedUnitCosts(ctx: Ctx, seedbedId: string, asOf?: string): UnitCost[] {
+  require(ctx, 'production.seedbed.view')
+  const { units } = compute(ctx, seedbedId, asOf)
+  return can(ctx, 'finance.cost.view') ? units : units.map(u => ({ ...u, cost: null, per_seedling: null }))
+}
+
+/** Cost per seedling of the tray (tray_id given) or of the open bed. A float bay without tray_id returns total bay cost (tray-own plus bay-level) / sum of tray counts,
+ *  but only when no unit is pending: any non-zero cost without a count (or bay-level cost with no tray) makes it pending with per_seedling null. */
 export function costPerSeedling(ctx: Ctx, src: { seedbed_id: string; tray_id?: string | null }, asOf: string): { per_seedling: number | null; pending: boolean } {
-  const units = seedbedUnitCosts(ctx, src.seedbed_id, asOf)
+  require(ctx, 'production.seedbed.view')
+  const { units, total } = compute(ctx, src.seedbed_id, asOf)
+  const show = can(ctx, 'finance.cost.view')
   if (src.tray_id) {
     const u = units.find(x => x.unit === 'tray' && x.id === src.tray_id); need(u, 'Tray not found in this seedbed')
-    return { per_seedling: u.per_seedling, pending: u.pending }
+    return { per_seedling: show ? u.per_seedling : null, pending: u.pending }
   }
-  if (units.length === 1 && units[0].unit === 'bed') return { per_seedling: units[0].per_seedling, pending: units[0].pending }
-  if (!can(ctx, 'finance.cost.view')) return { per_seedling: null, pending: false }
-  const { own, shared } = load(ctx, src.seedbed_id, asOf)
-  const total = round2([...own.values()].reduce((s, v) => s + v, 0) + shared)
   const seedlings = units.reduce((s, u) => s + (u.seedlings ?? 0), 0)
-  const pending = seedlings === 0 && total !== 0
-  return { per_seedling: pending || !seedlings ? null : round4(total / seedlings), pending }
+  const pending = units.some(u => u.pending) || (units.length === 0 && total !== 0)
+  return { per_seedling: show && !pending && seedlings ? round4(total / seedlings) : null, pending }
 }

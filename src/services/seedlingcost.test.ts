@@ -116,4 +116,29 @@ describe('seedling cost', () => {
     expect(() => seedbedUnitCosts(o, 'nope')).toThrow(/Seedbed not found/)
     expect(() => costPerSeedling(o, { seedbed_id: bay, tray_id: 'nope' }, '2026-12-01')).toThrow(/Tray not found/)
   })
+  it('bay level: an uncounted tray with own cost makes the whole bay pending (no inflated figure)', () => {
+    const a = tray(undefined); tray(100); cost(10, '2026-10-01', { tray: a }); cost(50, '2026-10-02')
+    expect(costPerSeedling(o, { seedbed_id: bay }, '2026-12-01')).toEqual({ per_seedling: null, pending: true })
+  })
+  it('float bay with zero trays and bay-level cost is pending; with no cost it is not', () => {
+    expect(costPerSeedling(o, { seedbed_id: bay }, '2026-12-01')).toEqual({ per_seedling: null, pending: false })
+    cost(50, '2026-10-02')
+    expect(units()).toEqual([]); expect(costPerSeedling(o, { seedbed_id: bay }, '2026-12-01')).toEqual({ per_seedling: null, pending: true })
+  })
+  it('a credit (negative amount) reduces cost; a net-zero uncounted tray is not pending', () => {
+    const a = tray(100); const b = tray(undefined)
+    cost(100, '2026-10-01', { tray: a }); cost(-20, '2026-10-02', { tray: a }); cost(5, '2026-10-01', { tray: b }); cost(-5, '2026-10-02', { tray: b })
+    const u = units(); expect(u[0]).toMatchObject({ cost: 80, per_seedling: 0.8 }); expect(u[1]).toMatchObject({ cost: 0, pending: false })
+    expect(costPerSeedling(o, { seedbed_id: bay }, '2026-12-01')).toEqual({ per_seedling: 0.8, pending: false })
+  })
+  it('pending is exposed without finance.cost.view on every path, while money stays null', () => {
+    const a = tray(undefined); tray(100); cost(10, '2026-10-01', { tray: a }); cost(50, '2026-10-02')
+    const u = units(noCostView()); expect(u[0]).toMatchObject({ cost: null, per_seedling: null, pending: true }); expect(u[1]).toMatchObject({ cost: null, pending: false })
+    expect(costPerSeedling(noCostView(), { seedbed_id: bay }, '2026-12-01')).toEqual({ per_seedling: null, pending: true })
+    expect(costPerSeedling(noCostView(), { seedbed_id: bay, tray_id: a }, '2026-12-01')).toEqual({ per_seedling: null, pending: true })
+  })
+  it('rejects an impossible asOf date', () => {
+    expect(() => units(o, '2026-13-45')).toThrow(/Invalid date/)
+    expect(() => costPerSeedling(o, { seedbed_id: bay }, '2026-13-45')).toThrow(/Invalid date/)
+  })
 })
