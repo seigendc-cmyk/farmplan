@@ -685,4 +685,53 @@ await assert.rejects(()=>db.query(`insert into funding_requests(tenant_id,farm_i
 await as(M); assert.equal((await db.query(`select * from funding_requests`)).rows.length,1); assert.equal((await db.query(`select * from funding_events`)).rows.length,2)
 await db.exec(`reset role`)
 
+// ---- 0021: tray types and seedbed trays ----
+await db.exec(`reset role`)
+await db.exec(readFileSync('supabase/migrations/0021_seedbed_trays.sql','utf8'))
+await db.exec(`grant all on all tables in schema public to authenticated; grant execute on all functions in schema public to authenticated;`)
+const bay21=(await db.query(`insert into seedbeds(tenant_id,farm_id,season_id,code,kind) values ('${ta}','${farm}','${seas}','BAY-21','float_bay') returning id`)).rows[0].id
+assert.equal((await db.query(`select kind from seedbeds where id='${sb}'`)).rows[0].kind,'open_bed')   // existing beds default to open_bed
+await assert.rejects(()=>db.query(`insert into seedbeds(tenant_id,farm_id,season_id,code,kind) values ('${ta}','${farm}','${seas}','POND-21','pond')`), /check/)
+const bayB21=(await db.query(`insert into seedbeds(tenant_id,farm_id,season_id,code,kind) values ('${tb}','${fb}','${seasB}','BAY-B21','float_bay') returning id`)).rows[0].id
+const ttB21=(await db.query(`insert into tray_types(tenant_id,farm_id,name,cells) values ('${tb}','${fb}','B tray',200) returning id`)).rows[0].id
+await db.exec(`set role authenticated`)
+await as(M)
+const tt21=(await db.query(`insert into tray_types(tenant_id,farm_id,name,cells,length_mm,width_mm,media) values ('${ta}','${farm}','200-cell',200,670,340,'peat') returning id`)).rows[0].id   // Farm Manager inserts
+await db.query(`update tray_types set note='standard' where id='${tt21}'`)
+assert.equal((await db.query(`select note from tray_types where id='${tt21}'`)).rows[0].note,'standard')
+const tray21=(await db.query(`insert into seedbed_trays(tenant_id,farm_id,seedbed_id,tray_type_id,code,expected_seedlings) values ('${ta}','${farm}','${bay21}','${tt21}','T-001',190) returning id`)).rows[0].id
+await db.query(`update seedbed_trays set status='germinating', actual_seedlings=185 where id='${tray21}'`)
+assert.equal((await db.query(`select status from seedbed_trays where id='${tray21}'`)).rows[0].status,'germinating')
+await assert.rejects(()=>db.query(`insert into tray_types(tenant_id,farm_id,name,cells) values ('${ta}','${farm}','zero',0)`), /check/)   // cells must be positive
+await assert.rejects(()=>db.query(`insert into seedbed_trays(tenant_id,farm_id,seedbed_id,tray_type_id,code) values ('${ta}','${farm}','${bay21}','${tt21}','T-001')`), e=>e.code==='23505')   // duplicate code in one bay
+await db.query(`insert into seedbed_trays(tenant_id,farm_id,seedbed_id,tray_type_id,code) values ('${ta}','${farm}','${sb}','${tt21}','T-001')`)   // same code in another bed is fine
+await assert.rejects(()=>db.query(`insert into seedbed_trays(tenant_id,farm_id,seedbed_id,tray_type_id,code,status) values ('${ta}','${farm}','${bay21}','${tt21}','T-002','drowned')`), /check/)
+await as(D)   // Field Recorder reads, does not write
+assert.equal((await db.query(`select * from tray_types`)).rows.length,1); assert.equal((await db.query(`select * from seedbed_trays`)).rows.length,2)
+await assert.rejects(()=>db.query(`insert into tray_types(tenant_id,farm_id,name,cells) values ('${ta}','${farm}','sneaky',50)`), RLS)
+await assert.rejects(()=>db.query(`insert into seedbed_trays(tenant_id,farm_id,seedbed_id,tray_type_id,code) values ('${ta}','${farm}','${bay21}','${tt21}','T-009')`), RLS)
+assert.equal((await db.query(`update seedbed_trays set status='ready' where id='${tray21}' returning id`)).rows.length,0)
+assert.equal((await db.query(`update tray_types set cells=1 where id='${tt21}' returning id`)).rows.length,0)
+await as(VW)   // a role without production.seedbed.view sees none
+assert.equal((await db.query(`select * from tray_types`)).rows.length,0); assert.equal((await db.query(`select * from seedbed_trays`)).rows.length,0)
+await assert.rejects(()=>db.query(`insert into tray_types(tenant_id,farm_id,name,cells) values ('${ta}','${farm}','vw',50)`), RLS)
+await as(B)   // another tenant sees none, and cannot point a tray at tenant A's bay
+assert.equal((await db.query(`select * from tray_types`)).rows.length,1); assert.equal((await db.query(`select * from seedbed_trays`)).rows.length,0)   // only its own tray type
+await assert.rejects(()=>db.query(`insert into seedbed_trays(tenant_id,farm_id,seedbed_id,tray_type_id,code) values ('${tb}','${fb}','${bay21}','${ttB21}','X-1')`), e=>e.code==='23503')   // composite FK: another tenant's seedbed
+await assert.rejects(()=>db.query(`insert into seedbed_trays(tenant_id,farm_id,seedbed_id,tray_type_id,code) values ('${tb}','${fb}','${bayB21}','${tt21}','X-2')`), e=>e.code==='23503')   // composite FK: another tenant's tray type
+await db.query(`insert into seedbed_trays(tenant_id,farm_id,seedbed_id,tray_type_id,code) values ('${tb}','${fb}','${bayB21}','${ttB21}','X-3')`)   // its own is fine
+// tray_id on operations, cost_entries, transplants and crop_season_id on transplants are composite FKs
+await db.exec(`reset role`)
+const op21=(await db.query(`insert into operations(tenant_id,farm_id,season_id,target_type,seedbed_id,op_type,phase,occurred_on,tray_id) values ('${ta}','${farm}','${seas}','seedbed','${bay21}','sowing','seedbed','2027-06-01','${tray21}') returning id`)).rows[0].id
+await assert.rejects(()=>db.query(`insert into operations(tenant_id,farm_id,season_id,target_type,seedbed_id,op_type,phase,occurred_on,tray_id) values ('${tb}','${fb}','${seasB}','seedbed','${bayB21}','sowing','seedbed','2027-06-01','${tray21}')`), e=>e.code==='23503')
+await db.query(`insert into cost_entries(tenant_id,farm_id,season_id,category,amount,occurred_on,source_type,tray_id) values ('${ta}','${farm}','${seas}','seed',5,'2027-06-01','manual','${tray21}')`)
+await assert.rejects(()=>db.query(`insert into cost_entries(tenant_id,farm_id,season_id,category,amount,occurred_on,source_type,tray_id) values ('${tb}','${fb}','${seasB}','seed',5,'2027-06-01','manual','${tray21}')`), e=>e.code==='23503')
+await db.query(`update seedbeds set actual_seedlings=100 where id='${bay21}'`)
+const cs21=(await db.query(`insert into seasons(tenant_id,farm_id,label,starts_on,ends_on) values ('${ta}','${farm}','2033/34','2033-09-01','2034-08-31') returning id`)).rows[0].id
+const tpSql21=(crop,tray)=>`insert into transplants(tenant_id,farm_id,season_id,seedbed_id,field_id,occurred_on,qty,crop_season_id,tray_id) values ('${ta}','${farm}','${seas}','${bay21}','${fld}','2027-08-01',10,${crop},${tray})`
+await db.query(tpSql21(`'${cs21}'`,`'${tray21}'`))                                              // same-tenant crop season and tray accepted
+await assert.rejects(()=>db.query(tpSql21(`'${seasB}'`,'null')), e=>e.code==='23503')            // another tenant's crop season rejected
+await assert.rejects(()=>db.query(tpSql21('null',`'${ttB21}'`)), e=>e.code==='23503')            // not a tray of this tenant
+assert.equal((await db.query(`select count(*)::int n from operations where tray_id='${tray21}'`)).rows[0].n,1); assert.ok(op21)
+
 console.log('ALL MIGRATION TESTS PASSED')
