@@ -70,7 +70,7 @@ export function costPerSeedling(ctx: Ctx, src: { seedbed_id: string; tray_id?: s
 
 /** Money for one transplant: round2(qty * unit cost / unit seedlings) from the source unit's cost as of the transplant date (never from the 4 dp per_seedling).
  *  null = pending (the unit has cost but no seedling count, or the tray vanished). Transplant labour carries a field and is not part of unit cost. */
-interface TpRow { id: string; seedbed_id: string; tray_id: string | null; field_id: string; qty: number; occurred_on: string }
+interface TpRow { id: string; seedbed_id: string; tray_id: string | null; field_id: string; qty: number; occurred_on: string; field_no?: string }
 function attribute(ctx: Ctx, rows: TpRow[]): (number | null)[] {
   const cache = new Map<string, UnitCost[]>()
   return rows.map(t => {
@@ -83,21 +83,50 @@ function attribute(ctx: Ctx, rows: TpRow[]): (number | null)[] {
   })
 }
 
-/** Seedling cost carried to the fields of a crop season by cross-season transplants (crop_season_id = the season; gap-fill included). Derived on every call, nothing stored:
- *  deleting a transplant removes its attribution. Legacy same-season transplants have no crop_season_id and are not here (their cost is already in the season).
- *  A row is pending (amount null) when any contributing transplant's source cost has no seedling count. amount is also null without finance.cost.view. */
-export function seedlingCostByField(ctx: Ctx, cropSeasonId: string): { field_id: string; seedlings: number; amount: number | null; pending: boolean }[] {
-  require(ctx, 'production.transplant.view')
-  const rows = ctx.db.all<TpRow>(`SELECT t.id, t.seedbed_id, t.tray_id, t.field_id, t.qty, t.occurred_on FROM transplants t JOIN fields f ON f.id=t.field_id
-    WHERE t.farm_id=? AND t.crop_season_id=? AND t.deleted_at IS NULL ORDER BY f.field_no, t.occurred_on, t.created_at`, [ctx.farmId, cropSeasonId])
-  const amounts = attribute(ctx, rows); const show = can(ctx, 'finance.cost.view')
-  const by = new Map<string, { field_id: string; seedlings: number; sum: number; pending: boolean }>()
+interface Grp { field_id: string; field_no: string; seedlings: number; sum: number; pending: boolean }
+/** Groups transplants by field with per-transplant amounts (one shared computation for the cross-season and legacy reads). */
+function group(ctx: Ctx, rows: TpRow[]): Map<string, Grp> {
+  const amounts = attribute(ctx, rows); const by = new Map<string, Grp>()
   rows.forEach((t, i) => {
-    const g = by.get(t.field_id) ?? { field_id: t.field_id, seedlings: 0, sum: 0, pending: false }
+    const g = by.get(t.field_id) ?? { field_id: t.field_id, field_no: t.field_no ?? '', seedlings: 0, sum: 0, pending: false }
     g.seedlings += t.qty; if (amounts[i] == null) g.pending = true; else g.sum += amounts[i]!
     by.set(t.field_id, g)
   })
-  return [...by.values()].map(g => ({ field_id: g.field_id, seedlings: g.seedlings, amount: show && !g.pending ? round2(g.sum) : null, pending: g.pending }))
+  return by
+}
+const TP_SELECT = `SELECT t.id, t.seedbed_id, t.tray_id, t.field_id, t.qty, t.occurred_on, f.field_no FROM transplants t JOIN fields f ON f.id=t.field_id WHERE t.farm_id=? AND t.deleted_at IS NULL`
+const crossRows = (ctx: Ctx, cropSeasonId: string) => ctx.db.all<TpRow>(`${TP_SELECT} AND t.crop_season_id=? ORDER BY f.field_no, t.occurred_on, t.created_at`, [ctx.farmId, cropSeasonId])
+const legacyRows = (ctx: Ctx, seasonId: string) => ctx.db.all<TpRow>(`${TP_SELECT} AND t.crop_season_id IS NULL AND t.season_id=? ORDER BY f.field_no, t.occurred_on, t.created_at`, [ctx.farmId, seasonId])
+
+/** Seedling cost carried to the fields of a crop season by cross-season transplants (crop_season_id = the season; gap-fill included). Derived on every call, nothing stored:
+ *  deleting a transplant removes its attribution. Legacy same-season transplants have no crop_season_id and are not here (see seedlingAttribution).
+ *  A row is pending (amount null) when any contributing transplant's source cost has no seedling count. amount is also null without finance.cost.view. */
+export function seedlingCostByField(ctx: Ctx, cropSeasonId: string): { field_id: string; seedlings: number; amount: number | null; pending: boolean }[] {
+  require(ctx, 'production.transplant.view')
+  const show = can(ctx, 'finance.cost.view')
+  return [...group(ctx, crossRows(ctx, cropSeasonId)).values()].map(g => ({ field_id: g.field_id, seedlings: g.seedlings, amount: show && !g.pending ? round2(g.sum) : null, pending: g.pending }))
+}
+
+export interface SeedlingAttribution { field_id: string; field_no: string; seedlings: number; amount: number | null; cross_amount: number | null; pending: boolean }
+/** Unmasked attribution of a season's fields (callers must already hold finance.cost.view). Both parts per field: legacy same-season transplants (crop_season_id NULL, season_id = the season;
+ *  their cost is already in the season's total) and cross-season ones (crop_season_id = the season; cost lives in another season). A field is all-or-nothing: if any of its transplants is pending
+ *  (source cost without a seedling count) amount and cross_amount are both null and pending is true, so a pending field adds nothing anywhere. */
+export function seedlingAttributionRaw(ctx: Ctx, seasonId: string): SeedlingAttribution[] {
+  const cross = group(ctx, crossRows(ctx, seasonId)); const legacy = group(ctx, legacyRows(ctx, seasonId))
+  const ids = new Map<string, string>(); for (const g of [...cross.values(), ...legacy.values()]) ids.set(g.field_id, g.field_no)
+  return [...ids.entries()].sort((a, b) => a[1].localeCompare(b[1])).map(([field_id, field_no]) => {
+    const c = cross.get(field_id), l = legacy.get(field_id); const pending = !!(c?.pending || l?.pending)
+    return { field_id, field_no, seedlings: (c?.seedlings ?? 0) + (l?.seedlings ?? 0), pending,
+      amount: pending ? null : round2((c?.sum ?? 0) + (l?.sum ?? 0)), cross_amount: pending ? null : round2(c?.sum ?? 0) }
+  })
+}
+
+/** Seedling cost attributed to each field for a season, legacy and cross-season together (Task 9 reports). amount / cross_amount are null when pending or without finance.cost.view.
+ *  cross_amount is the part whose seedbed lives in another season (the profitability transfer_in). */
+export function seedlingAttribution(ctx: Ctx, seasonId: string): { field_id: string; seedlings: number; amount: number | null; cross_amount: number | null; pending: boolean }[] {
+  require(ctx, 'production.transplant.view')
+  const show = can(ctx, 'finance.cost.view')
+  return seedlingAttributionRaw(ctx, seasonId).map(({ field_no: _n, ...r }) => show ? r : { ...r, amount: null, cross_amount: null })
 }
 
 /** The seedbed's total unit cost (all dates) less the amounts its transplants carried to fields (every live transplant of the bed, legacy ones too).

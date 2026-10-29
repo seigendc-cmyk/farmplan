@@ -35,6 +35,7 @@ export default function FieldRecord() {
         {t.rain_mm != null && <Stat label="Rain" value={`${fmt.num(t.rain_mm, 1)} mm`} sub="field + farm-wide records" />}
         {t.sold_kg != null && <Stat label="Sold" value={`${fmt.num(t.sold_kg)} kg`} sub={t.net_revenue != null ? `net ${fmt.money(t.net_revenue)}` : undefined} />}
         {money && <Stat label="Direct cost" value={fmt.money(t.cost)} sub={t.cost_per_ha != null ? `${fmt.money(t.cost_per_ha)} / ha` : undefined} />}
+        {t.seedling_cost != null && <Stat label="Seedling cost" value={fmt.money(t.seedling_cost)} sub="from seedbeds, in field cost" />}
         {t.shared_cost != null && <Stat label="Shared costs allocated" value={fmt.money(t.shared_cost)} />}
         {t.full_margin != null && <Stat label="Full margin" value={fmt.money(t.full_margin)} sub="net revenue − direct − shared" />}
       </Grid>

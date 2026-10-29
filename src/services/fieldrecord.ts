@@ -8,6 +8,7 @@ import { listMachineLogs } from './machinery'
 import { listBales } from './quality'
 import { revenueSummary } from './marketing'
 import { profitability } from './analytics'
+import { seedlingAttributionRaw } from './seedlingcost'
 import { canSeeAnyActivity, listActivity } from './activity'
 
 const per = (v: number, ha: number) => (ha > 0 ? round2(v / ha) : null)
@@ -54,13 +55,15 @@ export function fieldRecord(ctx: Ctx, fieldNo: string, seasonId?: string) {
   const cost = costs ? round2(costs.reduce((s, c) => s + c.amount, 0)) : null
   // Profit needs one season: revenue is booked to a bale's dominant field, and shared costs are allocated per season.
   const profit = sid && money ? profitability(ctx, sid).by_field.find(f => f.field_no === field.field_no) ?? null : null
+  /** Seedling cost carried to this field from seedbeds (needs one season and cost access); null when unknown (pending) or not applicable. Shown beside direct cost, already inside field cost in Profitability. */
+  const seedling_cost = sid && money ? seedlingAttributionRaw(ctx, sid).find(r => r.field_id === field.id)?.amount ?? null : null
   const revenue = sid && sales ? revenueSummary(ctx, sid).by_field.find(r => r.key === field.field_no) ?? null : null
   return {
     field, transplants, operations, harvests, labour, machine, bales, weather, costs, contracts, activity,
     totals: {
       established, plants_per_ha: established == null ? null : per(established, field.area_ha),
       green_kg: green, green_kg_per_ha: green == null ? null : per(green, field.area_ha), rain_mm: rain,
-      cost, cost_per_ha: cost == null ? null : per(cost, field.area_ha),
+      cost, seedling_cost, cost_per_ha: cost == null ? null : per(cost, field.area_ha),
       sold_kg: sales && sid ? revenue?.kg ?? 0 : null, net_revenue: finance && sid ? revenue?.net ?? 0 : null,
       shared_cost: profit?.allocated_cost ?? null, full_margin: finance ? profit?.full_margin ?? null : null,
     },

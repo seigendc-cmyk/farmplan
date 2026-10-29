@@ -3,6 +3,7 @@ import { listSeasons } from './seasons'
 import { revenueSummary } from './marketing'
 import { nonNeg } from './util'
 import { allocatedCosts, type AllocationLine } from './allocation'
+import { seedlingAttributionRaw } from './seedlingcost'
 
 export const COST_CATEGORIES = ['seed', 'fertilizer', 'chemicals', 'labour', 'machinery', 'fuel', 'irrigation', 'transport', 'curing', 'storage', 'grading', 'baling', 'marketing', 'overhead'] as const
 export type CostCategory = (typeof COST_CATEGORIES)[number]
@@ -54,11 +55,13 @@ export function planVsActual(ctx: Ctx, seasonId: string): PlanVsActual {
 }
 
 // ------------------------------------------------------------------ profitability
-export interface FieldProfit { field_no: string; area_ha: number; green_kg: number; green_kg_per_ha: number | null; field_cost: number; cost_per_ha: number | null; sold_kg: number; net_revenue: number | null; field_margin: number | null
+export interface FieldProfit { field_no: string; area_ha: number; green_kg: number; green_kg_per_ha: number | null; field_cost: number; seedling_cost: number; cost_per_ha: number | null; sold_kg: number; net_revenue: number | null; field_margin: number | null
   allocated_cost: number; full_cost: number; full_cost_per_ha: number | null; full_margin: number | null }
 export interface ContractProfit { contract: string; sold_kg: number; gross: number; net: number }
 export interface Profitability {
   season_id: string; harvested_ha: number; green_kg: number; sold_kg: number; total_cost: number; field_cost: number; shared_cost: number
+  /** Seedling cost attributed to fields (legacy + cross-season; included in field_cost), the cross-season part of it (added to total_cost), and how many fields could not be costed yet (pending adds nothing). */
+  seedling_cost: number; transfer_in: number; seedling_pending: number
   net_revenue: number | null; margin: number | null; margin_pct: number | null
   cost_per_ha: number | null; cost_per_kg_sold: number | null; net_per_kg: number | null; margin_per_ha: number | null
   allocated_cost: number; unallocated_cost: number; allocation: AllocationLine[]
@@ -68,19 +71,24 @@ export interface Profitability {
 export function profitability(ctx: Ctx, seasonId: string): Profitability {
   require(ctx, 'finance.cost.view')
   const db = ctx.db; const revenue = can(ctx, 'marketing.sale.view') ? revenueSummary(ctx, seasonId) : null
-  const total_cost = round2(db.get<{ s: number }>(`SELECT COALESCE(SUM(amount),0) s FROM cost_entries WHERE farm_id=? AND season_id=? AND deleted_at IS NULL`, [ctx.farmId, seasonId])!.s)
+  const own_cost = round2(db.get<{ s: number }>(`SELECT COALESCE(SUM(amount),0) s FROM cost_entries WHERE farm_id=? AND season_id=? AND deleted_at IS NULL`, [ctx.farmId, seasonId])!.s)
   const costs = new Map(db.all<{ f: string; c: number }>(`SELECT field_id f, SUM(amount) c FROM cost_entries WHERE farm_id=? AND season_id=? AND field_id IS NOT NULL AND deleted_at IS NULL GROUP BY field_id`, [ctx.farmId, seasonId]).map(r => [r.f, r.c]))
   const green = new Map(db.all<{ f: string; kg: number }>(`SELECT field_id f, SUM(green_weight_kg) kg FROM harvest_batches WHERE farm_id=? AND season_id=? AND deleted_at IS NULL GROUP BY field_id`, [ctx.farmId, seasonId]).map(r => [r.f, r.kg]))
-  const fields = db.all<{ id: string; field_no: string; area_ha: number }>(`SELECT id, field_no, area_ha FROM fields WHERE farm_id=? AND deleted_at IS NULL ORDER BY field_no`, [ctx.farmId]).filter(f => costs.has(f.id) || green.has(f.id))
+  // Seedling cost carried to fields by transplants: legacy same-season (already inside total_cost) and cross-season (transfer_in, added to total_cost). A pending field adds nothing.
+  const seedlings = seedlingAttributionRaw(ctx, seasonId); const seedBy = new Map(seedlings.filter(r => r.amount != null && r.amount !== 0).map(r => [r.field_id, r.amount!]))
+  const seedling_pending = seedlings.filter(r => r.pending).length
+  const transfer_in = round2(seedlings.reduce((s, r) => s + (r.cross_amount ?? 0), 0)); const seedling_cost = round2([...seedBy.values()].reduce((s, v) => s + v, 0))
+  const total_cost = round2(own_cost + transfer_in)
+  const fields = db.all<{ id: string; field_no: string; area_ha: number }>(`SELECT id, field_no, area_ha FROM fields WHERE farm_id=? AND deleted_at IS NULL ORDER BY field_no`, [ctx.farmId]).filter(f => costs.has(f.id) || green.has(f.id) || seedBy.has(f.id))
   const alloc = allocatedCosts(ctx, seasonId)
   const revBy = new Map((revenue?.by_field ?? []).map(r => [r.key, r]))
   const by_field: FieldProfit[] = fields.map(f => {
-    const a = alloc.by_field.get(f.id) ?? 0, c = round2(costs.get(f.id) ?? 0), g = round2(green.get(f.id) ?? 0), r = revBy.get(f.field_no)
-    return { field_no: f.field_no, area_ha: f.area_ha, green_kg: g, green_kg_per_ha: per(g, green.has(f.id) ? f.area_ha : 0), field_cost: c, cost_per_ha: per(c, f.area_ha),
+    const a = alloc.by_field.get(f.id) ?? 0, sc = seedBy.get(f.id) ?? 0, c = round2((costs.get(f.id) ?? 0) + sc), g = round2(green.get(f.id) ?? 0), r = revBy.get(f.field_no)
+    return { field_no: f.field_no, area_ha: f.area_ha, green_kg: g, green_kg_per_ha: per(g, green.has(f.id) ? f.area_ha : 0), field_cost: c, seedling_cost: sc, cost_per_ha: per(c, f.area_ha),
       sold_kg: r?.kg ?? 0, net_revenue: revenue ? r?.net ?? 0 : null, field_margin: revenue ? round2((r?.net ?? 0) - c) : null,
       allocated_cost: a, full_cost: round2(c + a), full_cost_per_ha: per(c + a, f.area_ha), full_margin: revenue ? round2((r?.net ?? 0) - c - a) : null }
   })
-  const field_cost = round2([...costs.values()].reduce((s, v) => s + v, 0))
+  const field_cost = round2([...costs.values()].reduce((s, v) => s + v, 0) + seedling_cost)
   const harvested_ha = round2(fields.filter(f => green.has(f.id)).reduce((s, f) => s + f.area_ha, 0))
   const green_kg = round2([...green.values()].reduce((s, v) => s + v, 0))
   const by_contract = !revenue ? [] : [...db.all<{ contract: string; kg: number; gross: number; share: number }>(
@@ -92,7 +100,7 @@ export function profitability(ctx: Ctx, seasonId: string): Profitability {
     .reduce((m, r) => { const e = m.get(r.contract) ?? { contract: r.contract, sold_kg: 0, gross: 0, net: 0 }; e.sold_kg += r.kg; e.gross += r.gross; e.net += r.gross * (1 - r.share); m.set(r.contract, e); return m }, new Map<string, ContractProfit>())
     .values()].map(e => ({ contract: e.contract, sold_kg: round2(e.sold_kg), gross: round2(e.gross), net: round2(e.net) })).sort((a, b) => a.contract.localeCompare(b.contract))
   const net = revenue ? revenue.net : null; const margin = net == null ? null : round2(net - total_cost)
-  return { season_id: seasonId, harvested_ha, green_kg, sold_kg: revenue?.kg ?? 0, total_cost, field_cost, shared_cost: round2(total_cost - field_cost), net_revenue: net, margin, margin_pct: net ? pct(margin!, net) : null,
+  return { season_id: seasonId, harvested_ha, green_kg, sold_kg: revenue?.kg ?? 0, total_cost, field_cost, shared_cost: round2(total_cost - field_cost), seedling_cost, transfer_in, seedling_pending, net_revenue: net, margin, margin_pct: net ? pct(margin!, net) : null,
     cost_per_ha: per(total_cost, harvested_ha), cost_per_kg_sold: per(total_cost, revenue?.kg ?? 0), net_per_kg: revenue ? revenue.net_per_kg : null, margin_per_ha: margin == null ? null : per(margin, harvested_ha),
     allocated_cost: alloc.allocated, unallocated_cost: alloc.unallocated, allocation: alloc.lines, by_field, by_contract }
 }
