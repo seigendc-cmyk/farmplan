@@ -79,24 +79,25 @@ export interface TransplantRow {
   id: string; occurred_on: string; kind: string; seedbed_code: string; field_no: string; season_label: string; qty: number; mortality: number
   established: number; spacing_row_m: number | null; spacing_plant_m: number | null; labour_workers: number | null; weather: string | null
   soil_condition: string | null; remarks: string | null; labour_cost: number | null
-  tray_code: string | null; crop_season_label: string | null
+  tray_code: string | null; crop_season_label: string | null; source_season_label: string
 }
 
+/** Each transplant belongs to exactly one season for listing and totals: its crop season when cross-season, else the bed's season. */
 export function listTransplants(ctx: Ctx, f: { seasonId?: string } = {}): TransplantRow[] {
   require(ctx, 'production.transplant.view')
   const money = can(ctx, 'finance.cost.view')
   return ctx.db.all<TransplantRow>(`SELECT t.id, t.occurred_on, t.kind, s.code seedbed_code, fl.field_no, se.label season_label, t.qty, t.mortality,
-      t.qty - t.mortality established, t.spacing_row_m, t.spacing_plant_m, t.labour_workers, t.weather, t.soil_condition, t.remarks, t.labour_cost, tr.code tray_code, cs.label crop_season_label
+      t.qty - t.mortality established, t.spacing_row_m, t.spacing_plant_m, t.labour_workers, t.weather, t.soil_condition, t.remarks, t.labour_cost, tr.code tray_code, cs.label crop_season_label, se.label source_season_label
     FROM transplants t JOIN seedbeds s ON s.id=t.seedbed_id JOIN fields fl ON fl.id=t.field_id JOIN seasons se ON se.id=t.season_id
       LEFT JOIN seedbed_trays tr ON tr.id=t.tray_id LEFT JOIN seasons cs ON cs.id=t.crop_season_id
-    WHERE t.farm_id=? AND t.deleted_at IS NULL ${f.seasonId ? 'AND (t.season_id=? OR t.crop_season_id=?)' : ''} ORDER BY t.occurred_on DESC, t.created_at DESC`,
-    f.seasonId ? [ctx.farmId, f.seasonId, f.seasonId] : [ctx.farmId]).map(r => ({ ...r, labour_cost: money ? r.labour_cost : null }))
+    WHERE t.farm_id=? AND t.deleted_at IS NULL ${f.seasonId ? 'AND COALESCE(t.crop_season_id, t.season_id)=?' : ''} ORDER BY t.occurred_on DESC, t.created_at DESC`,
+    f.seasonId ? [ctx.farmId, f.seasonId] : [ctx.farmId]).map(r => ({ ...r, labour_cost: money ? r.labour_cost : null }))
 }
 
 /** Plants established per field this season (transplanted + gap filled − mortality) and implied plants per hectare. */
 export function plantingByField(ctx: Ctx, seasonId: string) {
   require(ctx, 'production.transplant.view')
-  return ctx.db.all<{ field_no: string; area_ha: number; established: number; plants_per_ha: number }>(
-    `SELECT f.field_no, f.area_ha, SUM(t.qty - t.mortality) established, ROUND(SUM(t.qty - t.mortality) / f.area_ha) plants_per_ha
-     FROM transplants t JOIN fields f ON f.id=t.field_id WHERE (t.season_id=? OR t.crop_season_id=?) AND t.farm_id=? AND t.deleted_at IS NULL GROUP BY f.id ORDER BY f.field_no`, [seasonId, seasonId, ctx.farmId])
+  return ctx.db.all<{ field_id: string; field_no: string; area_ha: number; established: number; plants_per_ha: number }>(
+    `SELECT f.id field_id, f.field_no, f.area_ha, SUM(t.qty - t.mortality) established, ROUND(SUM(t.qty - t.mortality) / f.area_ha) plants_per_ha
+     FROM transplants t JOIN fields f ON f.id=t.field_id WHERE COALESCE(t.crop_season_id, t.season_id)=? AND t.farm_id=? AND t.deleted_at IS NULL GROUP BY f.id ORDER BY f.field_no`, [seasonId, ctx.farmId])
 }

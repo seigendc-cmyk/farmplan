@@ -101,6 +101,7 @@ export function seedlingCostByField(ctx: Ctx, cropSeasonId: string): { field_id:
 }
 
 /** The seedbed's total unit cost (all dates) less the amounts its transplants carried to fields (every live transplant of the bed, legacy ones too).
+ *  Costs dated after a transplant are not carried by it, so they inflate the loss; legacy same-season transplants are included.
  *  Exact difference, not clamped: each transplant is rounded to cents on its own, so a few cents of drift is possible. null without finance.cost.view,
  *  or when any transplant is pending (the split cannot be computed). */
 export function seedbedLoss(ctx: Ctx, seedbedId: string): number | null {

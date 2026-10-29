@@ -118,7 +118,7 @@ describe('trays', () => {
     const t = createTray(o, { seedbed_id: bay, tray_type_id: tt }); expect(() => deleteSeedbed(o, bay)).toThrow(/tray/)
     expect(bayRow()).toBeTruthy(); deleteTray(o, t); deleteSeedbed(o, bay); expect(listSeedbeds(o, season).find(s => s.id === bay)).toBeUndefined()
   })
-  it('transplanting from a bay is refused clearly (Task 8), without crashing', () => {
+  it('transplanting from a bay without a tray is refused clearly, without crashing', () => {
     createTray(o, { seedbed_id: bay, tray_type_id: tt, actual_seedlings: 100 })
     const f = db.insert('fields', { tenant_id: o.tenantId, farm_id: o.farmId, field_no: 'F1', area_ha: 1 })
     expect(() => recordTransplant(o, { seedbed_id: bay, field_id: f, occurred_on: '2026-10-01', qty: 10 })).toThrow(/float bay/i)

@@ -9,6 +9,7 @@ import { saveTrayType } from './traytypes'
 import { createTray } from './trays'
 import { recordTransplant, deleteTransplant, listTransplants, plantingByField } from './transplants'
 import { seedlingCostByField, seedbedLoss } from './seedlingcost'
+import { fieldRecord } from './fieldrecord'
 
 let db: Db; let o: Ctx; let crop: string; let sbSeason: string; let open: string; let bay: string; let tt: string; let f1: string; let f2: string
 beforeEach(async () => {
@@ -129,6 +130,21 @@ describe('seedling cost attribution', () => {
     tp({ qty: 300 }); expect(seedbedLoss(o, open)).toBe(100)
     tp({ qty: 100 }); expect(seedbedLoss(o, open)).toBe(0)
   })
+  it('seedbedLoss is null when any transplant is pending', () => {
+    cost(50, '2026-09-01'); tp({ qty: 10 }); db.run(`UPDATE seedbeds SET actual_seedlings=NULL WHERE id=?`, [open]); expect(seedbedLoss(o, open)).toBeNull()
+  })
+  it('seedbedLoss for a float bay: tray cost plus bay share, less what was planted', () => {
+    const a = createTray(o, { seedbed_id: bay, tray_type_id: tt, actual_seedlings: 100 }); createTray(o, { seedbed_id: bay, tray_type_id: tt, actual_seedlings: 100 })
+    cost(100, '2026-09-01', bay, a); cost(100, '2026-09-01', bay)   // a: 100 + 50 share = 150 over 100; other tray: 50
+    expect(seedbedLoss(o, bay)).toBe(200); tp({ seedbed_id: bay, tray_id: a, qty: 40 }); expect(seedbedLoss(o, bay)).toBe(140)
+  })
+  it('seedbedLoss with awkward cents: 100.00 over 3 seedlings, 1 planted attributes 33.33', () => {
+    db.run(`UPDATE seedbeds SET actual_seedlings=3 WHERE id=?`, [open]); cost(100, '2026-09-01'); tp({ qty: 1 })
+    expect(seedlingCostByField(o, crop)[0].amount).toBe(33.33); expect(seedbedLoss(o, open)).toBe(66.67)
+  })
+  it('costs dated after a transplant are not carried by it (they raise the loss)', () => {
+    cost(400, '2026-09-01'); tp({ qty: 100 }); cost(40, '2026-11-01'); expect(seedbedLoss(o, open)).toBe(340)
+  })
   it('transplant labour does not enter the bed cost or loss', () => {
     cost(400, '2026-09-01'); tp({ qty: 100, labour_cost: 50 }); expect(seedbedLoss(o, open)).toBe(300)
   })
@@ -140,6 +156,22 @@ describe('listing', () => {
     const rows = listTransplants(o, { seasonId: crop })
     expect(rows).toHaveLength(1); expect(rows[0]).toMatchObject({ seedbed_code: 'BAY1', tray_code: 'T-001', crop_season_label: '2026/27', qty: 20 })
     expect(plantingByField(o, crop)).toMatchObject([{ field_no: 'F1', established: 20 }])
+    expect(rows[0].source_season_label).toBe('SB 2026')
+  })
+  it('a cross-season transplant belongs to ONE season: the crop season, not the seedbed season', () => {
+    tp({ qty: 20 })
+    expect(listTransplants(o, { seasonId: sbSeason })).toEqual([]); expect(plantingByField(o, sbSeason)).toEqual([])
+    expect(listTransplants(o, { seasonId: crop })).toHaveLength(1); expect(plantingByField(o, crop)).toMatchObject([{ established: 20 }])
+    expect(listTransplants(o)).toHaveLength(1)
+  })
+  it('fieldRecord counts a cross-season transplant once, in the crop season only', () => {
+    tp({ qty: 20, mortality: 2 })
+    expect(fieldRecord(o, 'F1', crop).totals.established).toBe(18); expect(fieldRecord(o, 'F1', sbSeason).totals.established).toBe(0)
+  })
+  it('a legacy transplant stays in its own season only', () => {
+    const lb = createSeedbed(o, { season_id: crop, code: 'LB', bed_length_m: 10, bed_width_m: 1, bed_count: 1, actual_seedlings: 50 })
+    recordTransplant(o, { seedbed_id: lb, field_id: f1, occurred_on: '2026-10-02', qty: 10 })
+    expect(listTransplants(o, { seasonId: crop })).toHaveLength(1); expect(listTransplants(o, { seasonId: sbSeason })).toEqual([]); expect(plantingByField(o, crop)).toMatchObject([{ established: 10 }])
   })
   it('legacy rows show null tray and crop season', () => {
     const lb = createSeedbed(o, { season_id: crop, code: 'LB', bed_length_m: 10, bed_width_m: 1, bed_count: 1, actual_seedlings: 50 })

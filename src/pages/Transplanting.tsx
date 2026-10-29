@@ -18,7 +18,7 @@ export default function Transplanting() {
   const attributed = useData(c => sid ? seedlingCostByField(c, sid) : [], [sid]) ?? []
   const fields = useData(c => listFields(c)) ?? []
   const [edit, setEdit] = useState<Partial<TransplantInput> | null>(null)
-  const trays = useData(c => edit?.seedbed_id && allBeds.find(b => b.id === edit.seedbed_id)?.kind === 'float_bay' ? listTrays(c, edit.seedbed_id) : [], [edit?.seedbed_id, allBeds.length]) ?? []
+  const trays = useData(c => edit?.seedbed_id && allBeds.find(b => b.id === edit.seedbed_id)?.kind === 'float_bay' ? listTrays(c, edit.seedbed_id) : [], [edit?.seedbed_id, allBeds.find(b => b.id === edit?.seedbed_id)?.kind, rows?.length]) ?? []
   if (!rows) return <Denied what="transplanting" />
   const showCost = can('finance.cost.view'); const record = can('production.transplant.record')
   const established = rows.reduce((s, r) => s + r.established, 0)
@@ -28,7 +28,6 @@ export default function Transplanting() {
   const cropSeasons = seasons.filter(x => x.enterprise !== 'seedbed' && x.status !== 'closed')
   const bed = beds.find(b => b.id === edit?.seedbed_id)
   const cross = !!bed && isSbSeason(bed.season_id); const tray = trays.find(t => t.id === edit?.tray_id)
-  const fieldNo = (id: string) => fields.find(f => f.id === id)?.field_no ?? '—'
 
   async function save() {
     const e = edit!
@@ -43,7 +42,7 @@ export default function Transplanting() {
         <Stat label="Fields planted" value={byField.length} />
       </div>
       {byField.length > 0 && <Card className="mb-4"><Table head={['Field', { label: 'Area ha', right: true }, { label: 'Established', right: true }, { label: 'Plants / ha', right: true }, ...(showCost && attributed.length > 0 ? [{ label: 'Seedling cost', right: true }] : [])]}>
-        {byField.map(f => { const a = attributed.find(x => fieldNo(x.field_id) === f.field_no)
+        {byField.map(f => { const a = attributed.find(x => x.field_id === f.field_id)
           return <tr key={f.field_no}><Td className="font-medium"><RecLink kind="field" code={f.field_no} /></Td><Td right>{fmt.num(f.area_ha, 2)}</Td><Td right>{fmt.num(f.established)}</Td><Td right>{fmt.num(f.plants_per_ha)}</Td>
             {showCost && attributed.length > 0 && <Td right>{a ? (a.pending ? 'pending' : fmt.money(a.amount)) : '—'}</Td>}</tr> })}</Table></Card>}
       <Card><Table head={['Date', 'Type', 'Seedbed', 'Field', { label: 'Qty', right: true }, { label: 'Mortality', right: true }, { label: 'Established', right: true }, 'Spacing', ...(showCost ? [{ label: 'Labour', right: true }] : []), 'Remarks', '']} empty="No transplanting recorded for this season.">
