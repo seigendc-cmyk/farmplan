@@ -18,9 +18,10 @@ export function recordTransplant(ctx: Ctx, i: TransplantInput): string {
   const mort = i.mortality ?? 0
   need(Number.isInteger(mort) && mort >= 0 && mort <= i.qty, 'Mortality must be between 0 and the number transplanted')
   nonNeg(i.spacing_row_m, 'Row spacing'); nonNeg(i.spacing_plant_m, 'Plant spacing'); nonNeg(i.labour_workers, 'Workers'); nonNeg(i.labour_cost, 'Labour cost')
-  const sb = ctx.db.get<{ id: string; season_id: string; actual_seedlings: number | null; status: string; code: string }>(
-    `SELECT id, season_id, actual_seedlings, status, code FROM seedbeds WHERE id=? AND farm_id=? AND deleted_at IS NULL`, [i.seedbed_id, ctx.farmId])
+  const sb = ctx.db.get<{ id: string; season_id: string; actual_seedlings: number | null; status: string; code: string; kind: string }>(
+    `SELECT id, season_id, actual_seedlings, status, code, kind FROM seedbeds WHERE id=? AND farm_id=? AND deleted_at IS NULL`, [i.seedbed_id, ctx.farmId])
   need(sb, 'Seedbed not found')
+  need(sb.kind !== 'float_bay', `${sb.code} is a float bay; transplanting from float bays is not available yet`)
   need(sb.actual_seedlings != null, `Record the actual seedlings produced on ${sb.code} before transplanting from it`)
   need(ctx.db.get(`SELECT 1 FROM fields WHERE id=? AND farm_id=? AND deleted_at IS NULL`, [i.field_id, ctx.farmId]), 'Field not found')
   assertSeasonOpen(ctx, sb.season_id)
