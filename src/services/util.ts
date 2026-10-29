@@ -21,13 +21,13 @@ export function assertSeasonOpen(ctx: Ctx, seasonId: string) {
 }
 
 export interface CostLink { seasonId: string; category: string; amount: number; on: string; sourceType: string; sourceId: string
-  fieldId?: string | null; seedbedId?: string | null; cycleId?: string | null; note?: string }
+  fieldId?: string | null; seedbedId?: string | null; trayId?: string | null; cycleId?: string | null; note?: string }
 
 export function addCost(ctx: Ctx, c: CostLink) {
   if (!(c.amount > 0)) return
   ctx.db.insert('cost_entries', { tenant_id: ctx.tenantId, farm_id: ctx.farmId, season_id: c.seasonId, category: c.category, amount: round2(c.amount),
     occurred_on: c.on, seedbed_id: c.seedbedId ?? null, field_id: c.fieldId ?? null, cycle_id: c.cycleId ?? null,
-    source_type: c.sourceType, source_id: c.sourceId, note: c.note ?? null })
+    source_type: c.sourceType, source_id: c.sourceId, note: c.note ?? null, ...(c.trayId ? { tray_id: c.trayId } : {}) })
 }
 
 export function removeCostsFor(ctx: Ctx, sourceIds: string[]) {

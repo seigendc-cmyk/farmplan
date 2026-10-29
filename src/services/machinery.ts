@@ -50,6 +50,8 @@ export interface MachineLogInput {
   operation_id?: string | null
   /** Books the cost against this seedbed (machine lines of a seedbed operation). */
   seedbed_id?: string | null
+  /** With seedbed_id: books the cost against this float tray too. */
+  tray_id?: string | null
 }
 
 /**
@@ -87,8 +89,8 @@ export function logMachine(ctx: Ctx, i: MachineLogInput): { id: string; cost: nu
       hours: i.hours ?? null, fuel_l: i.fuel_l ?? null, cost: round2(workCost + fuelCost), description: i.description?.trim() || null, operator: i.operator ?? ctx.actor?.name ?? null, created_by: actor,
       input_id: fuelId, fuel_txn_id: txn, operation_id: i.operation_id ?? null })
     const note = `${m.name} — ${i.kind}${i.description ? `: ${i.description.trim()}` : ''}`
-    addCost(ctx, { seasonId: i.season_id, category: i.kind === 'fuel' ? 'fuel' : 'machinery', amount: workCost, on, sourceType: 'machine_log', sourceId: id, fieldId: i.field_id ?? null, seedbedId: i.seedbed_id ?? null, note })
-    addCost(ctx, { seasonId: i.season_id, category: 'fuel', amount: fuelCost, on, sourceType: 'machine_fuel', sourceId: id, fieldId: i.field_id ?? null, seedbedId: i.seedbed_id ?? null, note: `${m.name} — ${litres} L from the store` })
+    addCost(ctx, { seasonId: i.season_id, category: i.kind === 'fuel' ? 'fuel' : 'machinery', amount: workCost, on, sourceType: 'machine_log', sourceId: id, fieldId: i.field_id ?? null, seedbedId: i.seedbed_id ?? null, trayId: i.tray_id ?? null, note })
+    addCost(ctx, { seasonId: i.season_id, category: 'fuel', amount: fuelCost, on, sourceType: 'machine_fuel', sourceId: id, fieldId: i.field_id ?? null, seedbedId: i.seedbed_id ?? null, trayId: i.tray_id ?? null, note: `${m.name} — ${litres} L from the store` })
     ctx.db.audit(actor, 'machine.log', 'machine_logs', id, { machine: m.name, kind: i.kind }); return { id, cost: round2(workCost + fuelCost) }
   })
 }

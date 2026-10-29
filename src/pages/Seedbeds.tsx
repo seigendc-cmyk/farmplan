@@ -62,7 +62,7 @@ export default function Seedbeds() {
             <Td className="text-right space-x-1 whitespace-nowrap">
               <Button small variant="ghost" onClick={() => setDiary(r)}>Diary</Button>
               {r.kind === 'float_bay' && <Button small aria-label={`Trays ${r.code}`} onClick={() => setBayId(r.id)}>Trays</Button>}
-              {can('production.operation.record') && r.kind !== 'float_bay' && <Button small onClick={() => setRecording(r)}>Record</Button>}
+              {can('production.operation.record') && <Button small onClick={() => setRecording(r)}>Record</Button>}
               {manage && <Button small onClick={() => setEdit({ ...r })}>Edit</Button>}</Td></tr>))}
       </Table></Card>
 

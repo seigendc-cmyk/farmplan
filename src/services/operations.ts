@@ -4,9 +4,10 @@ import { recordLabour } from './labour'
 import { logMachine, removeMachineLog } from './machinery'
 import { removeCostsFor } from './util'
 
-export const OPERATION_TYPES: Record<'seedbed' | 'land_prep' | 'field', string[]> = {
+export const OPERATION_TYPES: Record<'seedbed' | 'float_tray' | 'land_prep' | 'field', string[]> = {
   seedbed: ['Bed preparation', 'Sowing', 'Fertilizer', 'Chemical application', 'Watering', 'Weeding', 'Thinning', 'Clipping',
     'Pest control', 'Disease control', 'Seedling selection', 'Hardening', 'Other'],
+  float_tray: ['Tray filling', 'Seed placement', 'Float water top-up', 'Float water fertilizer', 'Water quality check', 'Clipping', 'Tray hardening', 'Tray cleaning', 'Other'],
   land_prep: ['Clearing', 'Ripping', 'Ploughing', 'Discing', 'Harrowing', 'Ridging', 'Fertilizer application', 'Other preparation'],
   field: ['Weeding', 'Fertilizing', 'Spraying', 'Irrigation', 'Pest scouting', 'Disease scouting', 'Topping', 'Suckering', 'Clipping',
     'Cultivation', 'Other'],
@@ -15,7 +16,8 @@ export const OPERATION_TYPES: Record<'seedbed' | 'land_prep' | 'field', string[]
 const COST_CATEGORY: Record<string, string> = { seed: 'seed', fertilizer: 'fertilizer', chemical: 'chemicals', fuel: 'fuel', packaging: 'baling', other: 'overhead' }
 
 export interface OperationInput {
-  target: { type: 'seedbed' | 'field'; id: string }
+  /** `tray_id` (seedbed targets only) pins the operation to one tray of a float bay; without it a bay operation is a shared, bay-level cost. */
+  target: { type: 'seedbed' | 'field'; id: string; tray_id?: string | null }
   season_id?: string
   op_type: string
   phase?: 'seedbed' | 'land_prep' | 'field'
@@ -64,10 +66,13 @@ export function recordOperation(ctx: Ctx, i: OperationInput): string {
   }
 
   let seasonId = i.season_id; let phase = i.phase
+  const trayId = i.target.tray_id || null; let tray: { sown_on: string | null } | undefined; let isBay = false
   if (i.target.type === 'seedbed') {
-    const sb = ctx.db.get<{ season_id: string; sown_on: string | null }>(`SELECT season_id, sown_on FROM seedbeds WHERE id=? AND farm_id=? AND deleted_at IS NULL`, [i.target.id, ctx.farmId])
-    need(sb, 'Seedbed not found'); seasonId = sb.season_id; phase = 'seedbed'
+    const sb = ctx.db.get<{ season_id: string; sown_on: string | null; kind: string }>(`SELECT season_id, sown_on, kind FROM seedbeds WHERE id=? AND farm_id=? AND deleted_at IS NULL`, [i.target.id, ctx.farmId])
+    need(sb, 'Seedbed not found'); seasonId = sb.season_id; phase = 'seedbed'; isBay = sb.kind === 'float_bay'
+    if (trayId) { tray = ctx.db.get<{ sown_on: string | null }>(`SELECT sown_on FROM seedbed_trays WHERE id=? AND seedbed_id=? AND farm_id=? AND deleted_at IS NULL`, [trayId, i.target.id, ctx.farmId]); need(tray, 'Tray not found in this seedbed') }
   } else {
+    need(!trayId, 'Trays belong to a float bay; a field operation cannot name a tray')
     need(ctx.db.get(`SELECT 1 FROM fields WHERE id=? AND farm_id=? AND deleted_at IS NULL`, [i.target.id, ctx.farmId]), 'Field not found')
     need(seasonId, 'Select a season for this field operation'); phase = phase ?? 'field'
   }
@@ -79,12 +84,12 @@ export function recordOperation(ctx: Ctx, i: OperationInput): string {
     const db = ctx.db; const actor = ctx.actor?.id ?? null
     const opId = db.insert('operations', {
       tenant_id: ctx.tenantId, farm_id: ctx.farmId, season_id: seasonId!, target_type: i.target.type,
-      seedbed_id: i.target.type === 'seedbed' ? i.target.id : null, field_id: i.target.type === 'field' ? i.target.id : null,
+      seedbed_id: i.target.type === 'seedbed' ? i.target.id : null, field_id: i.target.type === 'field' ? i.target.id : null, ...(trayId ? { tray_id: trayId } : {}),
       op_type: i.op_type.trim(), phase: phase!, occurred_on: i.occurred_on, area_ha: i.area_ha ?? null,
       operator: i.operator ?? null, weather: i.weather ?? null, remarks: i.remarks ?? null, created_by: actor })
 
     const costBase = { tenant_id: ctx.tenantId, farm_id: ctx.farmId, season_id: seasonId!, occurred_on: i.occurred_on,
-      seedbed_id: i.target.type === 'seedbed' ? i.target.id : null, field_id: i.target.type === 'field' ? i.target.id : null }
+      seedbed_id: i.target.type === 'seedbed' ? i.target.id : null, field_id: i.target.type === 'field' ? i.target.id : null, ...(trayId ? { tray_id: trayId } : {}) }
 
     for (const l of lines) {
       const inp = db.get<{ name: string; category: string; unit: string }>(`SELECT name,category,unit FROM inputs WHERE id=? AND tenant_id=? AND deleted_at IS NULL`, [l.input_id, ctx.tenantId])
@@ -100,11 +105,14 @@ export function recordOperation(ctx: Ctx, i: OperationInput): string {
         source_type: 'operation_input', source_id: oi, note: `${inp.name} × ${l.qty} ${inp.unit}` })
     }
     const fieldId = i.target.type === 'field' ? i.target.id : null; const seedbedId = i.target.type === 'seedbed' ? i.target.id : null
-    for (const w of workers) recordLabour(ctx, { season_id: seasonId!, field_id: fieldId, worked_on: i.occurred_on, worker_name: w.worker_name, task: i.op_type.trim(), hours: w.hours ?? null, pay_amount: w.pay ?? 0, operation_id: opId, seedbed_id: seedbedId })
+    for (const w of workers) recordLabour(ctx, { season_id: seasonId!, field_id: fieldId, worked_on: i.occurred_on, worker_name: w.worker_name, task: i.op_type.trim(), hours: w.hours ?? null, pay_amount: w.pay ?? 0, operation_id: opId, seedbed_id: seedbedId, tray_id: trayId })
     for (const m of machines) logMachine(ctx, { machine_id: m.machine_id, season_id: seasonId!, kind: 'use', logged_on: i.occurred_on, field_id: fieldId, hours: m.hours, fuel_l: m.fuel_l ?? null,
-      ...(m.input_id !== undefined ? { input_id: m.input_id } : {}), operator: i.operator, description: i.op_type.trim(), operation_id: opId, seedbed_id: seedbedId })
+      ...(m.input_id !== undefined ? { input_id: m.input_id } : {}), operator: i.operator, description: i.op_type.trim(), operation_id: opId, seedbed_id: seedbedId, tray_id: trayId })
 
-    if (i.target.type === 'seedbed' && /sow/i.test(i.op_type)) {
+    if (tray) {
+      // On a float tray, sowing (Sowing, or Seed placement) dates the tray once; a bay-level operation never dates the bay.
+      if (!tray.sown_on && /sow|seed placement/i.test(i.op_type)) { db.update('seedbed_trays', trayId!, { sown_on: i.occurred_on }); db.audit(actor, 'tray.update', 'seedbed_trays', trayId!, { sown_on: i.occurred_on, by: 'operation' }) }
+    } else if (i.target.type === 'seedbed' && !isBay && /sow/i.test(i.op_type)) {
       const sb = db.get<{ sown_on: string | null; status: string }>(`SELECT sown_on, status FROM seedbeds WHERE id=?`, [i.target.id])!
       if (!sb.sown_on) db.update('seedbeds', i.target.id, { sown_on: i.occurred_on, status: 'sown' })
     }
@@ -135,7 +143,7 @@ export function deleteOperation(ctx: Ctx, id: string) {
 }
 
 export interface OperationRow {
-  id: string; occurred_on: string; op_type: string; target_type: string; target_code: string; season_label: string
+  id: string; occurred_on: string; op_type: string; target_type: string; target_code: string; tray_code: string | null; season_label: string
   labour_hours: number | null; operator: string | null; weather: string | null; remarks: string | null
   inputs: string; cost: number | null
   /** Linked worker and machine lines, e.g. "Tendai 8 h; Rudo 8 h" and "MF 375 3 h, 20 L". */
@@ -152,7 +160,7 @@ export function listOperations(ctx: Ctx, f: { seasonId?: string; targetType?: 's
   if (f.targetType === 'field' && f.targetId) { where.push('o.field_id=?'); p.push(f.targetId) }
   const showCost = can(ctx, 'finance.cost.view')
   return ctx.db.all<OperationRow & { c: number }>(
-    `SELECT o.id, o.occurred_on, o.op_type, o.target_type, COALESCE(sb.code, fl.field_no) AS target_code, se.label AS season_label,
+    `SELECT o.id, o.occurred_on, o.op_type, o.target_type, COALESCE(sb.code, fl.field_no) AS target_code, tr.code AS tray_code, se.label AS season_label,
        COALESCE(o.labour_hours, (SELECT SUM(hours) FROM labour_entries le WHERE le.operation_id=o.id AND le.deleted_at IS NULL)) AS labour_hours, o.operator, o.weather, o.remarks,
        COALESCE((SELECT group_concat(le.worker_name || CASE WHEN le.hours IS NULL THEN '' ELSE ' ' || printf('%g', le.hours) || ' h' END, '; ') FROM labour_entries le WHERE le.operation_id=o.id AND le.deleted_at IS NULL),'') AS workers,
        COALESCE((SELECT group_concat(m.name || CASE WHEN ml.hours IS NULL THEN '' ELSE ' ' || printf('%g', ml.hours) || ' h' END || CASE WHEN ml.fuel_l IS NULL THEN '' ELSE ', ' || printf('%g', ml.fuel_l) || ' L' END, '; ') FROM machine_logs ml JOIN machines m ON m.id=ml.machine_id
@@ -166,7 +174,7 @@ export function listOperations(ctx: Ctx, f: { seasonId?: string; targetType?: 's
                   (c.source_type='operation_input' AND c.source_id IN (SELECT id FROM operation_inputs WHERE operation_id=o.id)) OR
                   c.source_id IN (SELECT id FROM labour_entries WHERE operation_id=o.id) OR c.source_id IN (SELECT id FROM machine_logs WHERE operation_id=o.id))),0) AS c
      FROM operations o JOIN seasons se ON se.id=o.season_id
-     LEFT JOIN seedbeds sb ON sb.id=o.seedbed_id LEFT JOIN fields fl ON fl.id=o.field_id
+     LEFT JOIN seedbeds sb ON sb.id=o.seedbed_id LEFT JOIN seedbed_trays tr ON tr.id=o.tray_id LEFT JOIN fields fl ON fl.id=o.field_id
      WHERE ${where.join(' AND ')} ORDER BY o.occurred_on DESC, o.created_at DESC LIMIT ${Math.min(f.limit ?? 300, 1000)}`, p)
     .map(({ c, ...r }) => ({ ...r, cost: showCost ? round2(c) : null }))
 }

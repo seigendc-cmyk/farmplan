@@ -5,7 +5,9 @@ export interface LabourInput { season_id: string; field_id?: string | null; work
   /** Set by recordOperation when the entry is one of an operation's worker lines. */
   operation_id?: string | null
   /** Books the pay against this seedbed (for worker lines of a seedbed operation); labour entries themselves are per field. */
-  seedbed_id?: string | null }
+  seedbed_id?: string | null
+  /** With seedbed_id: books the pay against this float tray too. */
+  tray_id?: string | null }
 
 /** One labour entry per worker per task per day. Pay becomes a 'labour' cost against the season (and field, when given). */
 export function recordLabour(ctx: Ctx, i: LabourInput): string {
@@ -17,7 +19,7 @@ export function recordLabour(ctx: Ctx, i: LabourInput): string {
   return ctx.db.tx(() => {
     const id = ctx.db.insert('labour_entries', { tenant_id: ctx.tenantId, farm_id: ctx.farmId, season_id: i.season_id, field_id: i.field_id ?? null, worked_on: i.worked_on,
       worker_name: i.worker_name.trim(), task: i.task.trim(), hours: i.hours ?? null, pay_amount: round2(i.pay_amount ?? 0), remarks: i.remarks ?? null, created_by: ctx.actor?.id ?? null, operation_id: i.operation_id ?? null })
-    addCost(ctx, { seasonId: i.season_id, category: 'labour', amount: i.pay_amount ?? 0, on: i.worked_on, sourceType: 'labour_entry', sourceId: id, fieldId: i.field_id ?? null, seedbedId: i.seedbed_id ?? null, note: `${i.worker_name.trim()} — ${i.task.trim()}` })
+    addCost(ctx, { seasonId: i.season_id, category: 'labour', amount: i.pay_amount ?? 0, on: i.worked_on, sourceType: 'labour_entry', sourceId: id, fieldId: i.field_id ?? null, seedbedId: i.seedbed_id ?? null, trayId: i.tray_id ?? null, note: `${i.worker_name.trim()} — ${i.task.trim()}` })
     ctx.db.audit(ctx.actor?.id ?? null, 'labour.record', 'labour_entries', id, { worker: i.worker_name, task: i.task })
     return id
   })

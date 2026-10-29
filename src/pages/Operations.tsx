@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { OPERATION_TYPES, deleteOperation, listOperations, recordOperation, type OperationInput } from '../services/operations'
 import { listFields } from '../services/fields'
 import { listSeedbeds } from '../services/seedbeds'
+import { listTrays } from '../services/trays'
 import { listSeasons } from '../services/seasons'
 import { listInputs } from '../services/inventory'
 import { listMachines } from '../services/machinery'
@@ -27,15 +28,19 @@ export function RecordOperation({ target, seasonId, onClose }: { target?: Target
   const [machineLines, setMachineLines] = useState<{ machine_id: string; hours?: number; fuel_l?: number }[]>([])
   const machines = (useData(c => can('resources.machinery.view') ? listMachines(c) : []) ?? []).filter(m => m.active)
   const canWorkers = can('resources.labour.record'); const canMachines = can('resources.machinery.record') && machines.length > 0
+  const [trayId, setTrayId] = useState('')
   const effType = target?.type ?? tType
-  const types = effType === 'seedbed' ? OPERATION_TYPES.seedbed : OPERATION_TYPES[phase]
+  const bayId = effType === 'seedbed' ? target?.id ?? tId : ''
+  const isBay = !!bayId && seedbeds.find(s => s.id === bayId)?.kind === 'float_bay'
+  const trays = useData(c => isBay && can('production.seedbed.view') ? listTrays(c, bayId) : [], [isBay, bayId]) ?? []
+  const types = effType === 'seedbed' ? (isBay ? OPERATION_TYPES.float_tray : OPERATION_TYPES.seedbed) : OPERATION_TYPES[phase]
   const showCost = can('finance.cost.edit')
   const set = <K extends keyof OperationInput>(k: K, v: OperationInput[K] | undefined) => setF(p => ({ ...p, [k]: v }))
   const options = effType === 'seedbed' ? seedbeds.map(s => ({ id: s.id, label: `${s.code} (${s.season_label})` })) : fields.map(x => ({ id: x.id, label: `Field ${x.field_no}` }))
 
   async function submit() {
     const ok = await run(() => recordOperation(ctx, {
-      ...(f as OperationInput), target: { type: effType, id: target?.id ?? tId }, season_id: effType === 'field' ? season : undefined,
+      ...(f as OperationInput), target: { type: effType, id: target?.id ?? tId, ...(isBay && trayId ? { tray_id: trayId } : {}) }, season_id: effType === 'field' ? season : undefined,
       phase: effType === 'field' ? phase : undefined,
       inputs: lines.filter(l => l.input_id && l.qty).map(l => ({ input_id: l.input_id, qty: l.qty!, rate_note: l.rate_note })),
       workers: workers.filter(w => w.worker_name.trim()).map(w => ({ worker_name: w.worker_name, hours: w.hours ?? null, pay: w.pay ?? 0 })),
@@ -46,10 +51,13 @@ export function RecordOperation({ target, seasonId, onClose }: { target?: Target
     <Modal title={target ? `Record operation — ${target.label}` : 'Record operation'} onClose={onClose} wide>
       <form className="space-y-4" onSubmit={e => { e.preventDefault(); void submit() }}>
         {!target && <Grid cols={3}>
-          <Label text="Applies to"><Select value={tType} onChange={e => { setTType(e.target.value as 'seedbed' | 'field'); setTId(''); set('op_type', '') }}><option value="field">Field</option><option value="seedbed">Seedbed</option></Select></Label>
-          <Label text={tType === 'field' ? 'Field' : 'Seedbed'}><Select value={tId} onChange={e => setTId(e.target.value)} required><option value="">Select…</option>{options.map(o => <option key={o.id} value={o.id}>{o.label}</option>)}</Select></Label>
+          <Label text="Applies to"><Select value={tType} onChange={e => { setTType(e.target.value as 'seedbed' | 'field'); setTId(''); setTrayId(''); set('op_type', '') }}><option value="field">Field</option><option value="seedbed">Seedbed</option></Select></Label>
+          <Label text={tType === 'field' ? 'Field' : 'Seedbed'}><Select value={tId} onChange={e => { setTId(e.target.value); setTrayId(''); set('op_type', '') }} required><option value="">Select…</option>{options.map(o => <option key={o.id} value={o.id}>{o.label}</option>)}</Select></Label>
           {tType === 'field' && <Label text="Season"><Select value={season} onChange={e => setSeason(e.target.value)} required>{seasons.filter(s => s.status !== 'closed').map(s => <option key={s.id} value={s.id}>{s.label}</option>)}</Select></Label>}
         </Grid>}
+        {isBay && (trays.length > 0
+          ? <Label text="Tray" hint="Pick a tray to cost this work to one tray, or leave on Whole bay for shared work such as bay water."><Select value={trayId} onChange={e => setTrayId(e.target.value)}><option value="">Whole bay (shared)</option>{trays.map(t => <option key={t.id} value={t.id}>{t.code} — {t.tray_type}</option>)}</Select></Label>
+          : <p className="text-xs text-gray-600">No trays in this bay yet; the operation will be recorded against the whole bay. Add trays under Seedbeds to cost work to a tray.</p>)}
         {target?.type === 'field' && <Label text="Season"><Select value={season} onChange={e => setSeason(e.target.value)} required>{seasons.filter(s => s.status !== 'closed').map(s => <option key={s.id} value={s.id}>{s.label}</option>)}</Select></Label>}
         <Grid cols={3}>
           {effType === 'field' && <Label text="Stage"><Select value={phase} onChange={e => { setPhase(e.target.value as 'land_prep' | 'field'); set('op_type', '') }}><option value="land_prep">Land preparation</option><option value="field">Field operation</option></Select></Label>}
@@ -116,7 +124,7 @@ export default function Operations() {
           <Select value={type} onChange={e => setType(e.target.value as '' | 'seedbed' | 'field')} className="w-32"><option value="">All</option><option value="seedbed">Seedbeds</option><option value="field">Fields</option></Select>
           {can('production.operation.record') && <Button variant="primary" onClick={() => setOpen(true)}>Record operation</Button>}</>} />
       <Card><Table head={['Date', 'Season', 'Target', 'Operation', 'Inputs', 'Operator', ...(showCost ? [{ label: 'Cost', right: true }] : []), 'Remarks', '']} empty="No operations recorded.">
-        {shown.map(o => (<tr key={o.id} className="hover:bg-gray-50"><Td>{fmt.date(o.occurred_on)}</Td><Td>{o.season_label}</Td><Td className="font-medium">{o.target_type === 'field' ? <>Field <RecLink kind="field" code={o.target_code} /></> : o.target_code}</Td>
+        {shown.map(o => (<tr key={o.id} className="hover:bg-gray-50"><Td>{fmt.date(o.occurred_on)}</Td><Td>{o.season_label}</Td><Td className="font-medium">{o.target_type === 'field' ? <>Field <RecLink kind="field" code={o.target_code} /></> : <>{o.target_code}{o.tray_code && <div className="text-xs font-normal text-gray-600">{o.tray_code}</div>}</>}</Td>
           <Td>{o.op_type}{o.workers && <div className="text-xs text-gray-600">Workers: {o.workers}</div>}{o.machines && <div className="text-xs text-gray-600">Machines: {o.machines}</div>}
             {o.legacy_machinery && <div className="text-xs text-gray-500" title="Recorded before machine logs; not counted in machine hours">Machine (old entry): {o.legacy_machinery}</div>}</Td><Td className="max-w-xs">{o.inputs || '—'}</Td><Td>{o.operator ?? '—'}</Td>{showCost && <Td right>{fmt.money(o.cost)}</Td>}<Td className="max-w-xs">{o.remarks ?? ''}</Td>
           <Td className="text-right">{can('production.operation.delete') && <Button small variant="danger" onClick={() => confirm('Delete this operation? Stock and costs will be reversed.') && run(() => deleteOperation(ctx, o.id), 'Operation reversed')}>Delete</Button>}</Td></tr>))}
