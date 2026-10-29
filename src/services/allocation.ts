@@ -1,6 +1,7 @@
 import { type Ctx, require, can, need, round2 } from './context'
 import { revenueSummary } from './marketing'
 import { COST_CATEGORIES } from './analytics'
+import { legacyAttributedByCategory } from './seedlingcost'
 
 export const ALLOCATION_BASES = ['none', 'area', 'green_kg', 'sold_kg'] as const
 export type AllocationBasis = (typeof ALLOCATION_BASES)[number]
@@ -50,11 +51,14 @@ export function splitByWeight(amount: number, weights: number[]): number[] {
 export interface AllocationLine { category: string; basis: AllocationBasis; amount: number; allocated: number; unallocated: number }
 export interface Allocation { by_field: Map<string, number>; lines: AllocationLine[]; allocated: number; unallocated: number }
 
-/** Spreads cost entries with no field over the fields harvested in the season, using each category's rule. */
+/** Spreads cost entries with no field over the fields harvested in the season, using each category's rule. Legacy seedbed cost already attributed to fields through transplants
+ *  is taken out of the pool (it is in the field's own cost), so it is never counted twice; the unattributed remainder stays shared. */
 export function allocatedCosts(ctx: Ctx, seasonId: string): Allocation {
   require(ctx, 'finance.cost.view')
   const db = ctx.db
+  const taken = legacyAttributedByCategory(ctx, seasonId)
   const shared = db.all<{ category: string; a: number }>(`SELECT category, SUM(amount) a FROM cost_entries WHERE farm_id=? AND season_id=? AND field_id IS NULL AND deleted_at IS NULL GROUP BY category`, [ctx.farmId, seasonId])
+    .map(s => ({ category: s.category, a: s.a - (taken.get(s.category) ?? 0) })).filter(s => Math.round(s.a * 100) !== 0)
   const fields = db.all<{ id: string; field_no: string; area_ha: number; kg: number }>(
     `SELECT f.id, f.field_no, f.area_ha, SUM(h.green_weight_kg) kg FROM harvest_batches h JOIN fields f ON f.id=h.field_id
      WHERE h.farm_id=? AND h.season_id=? AND h.deleted_at IS NULL GROUP BY f.id ORDER BY f.field_no`, [ctx.farmId, seasonId])

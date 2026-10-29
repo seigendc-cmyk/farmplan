@@ -34,8 +34,8 @@ export default function FieldRecord() {
         {t.green_kg != null && <Stat label="Green leaf" value={`${fmt.num(t.green_kg)} kg`} sub={t.green_kg_per_ha ? `${fmt.num(t.green_kg_per_ha)} kg / ha` : undefined} />}
         {t.rain_mm != null && <Stat label="Rain" value={`${fmt.num(t.rain_mm, 1)} mm`} sub="field + farm-wide records" />}
         {t.sold_kg != null && <Stat label="Sold" value={`${fmt.num(t.sold_kg)} kg`} sub={t.net_revenue != null ? `net ${fmt.money(t.net_revenue)}` : undefined} />}
-        {money && <Stat label="Direct cost" value={fmt.money(t.cost)} sub={t.cost_per_ha != null ? `${fmt.money(t.cost_per_ha)} / ha` : undefined} />}
-        {t.seedling_cost != null && <Stat label="Seedling cost" value={fmt.money(t.seedling_cost)} sub="from seedbeds, in field cost" />}
+        {money && <Stat label="Direct cost" value={fmt.money(t.direct_cost)} sub={[t.direct_cost_per_ha != null ? `${fmt.money(t.direct_cost_per_ha)} / ha` : null, t.seedling_cost ? `includes ${fmt.money(t.seedling_cost)} seedling cost` : null].filter(Boolean).join(' · ') || undefined} />}
+        {t.seedling_cost != null && <Stat label="Seedling cost" value={fmt.money(t.seedling_cost)} sub={t.seedling_pending > 0 ? `partial: ${t.seedling_pending} not costed yet · included in direct cost` : 'from seedbeds · included in direct cost'} />}
         {t.shared_cost != null && <Stat label="Shared costs allocated" value={fmt.money(t.shared_cost)} />}
         {t.full_margin != null && <Stat label="Full margin" value={fmt.money(t.full_margin)} sub="net revenue − direct − shared" />}
       </Grid>
@@ -81,7 +81,7 @@ export default function FieldRecord() {
       <Section title="Direct costs by category" show={r.ok.costs}>
         <Table head={['Category', { label: 'Amount', right: true }]} empty="No costs booked to this field.">
           {r.ok.costs?.map(c => <tr key={c.category}><Td className="capitalize">{c.category}</Td><Td right>{fmt.money(c.amount)}</Td></tr>)}</Table>
-        <p className="px-4 pb-3 text-xs text-gray-500">Shared costs (curing, grading, overheads…) are spread under Finance → Profitability → Allocation rules.</p></Section>
+        <p className="px-4 pb-3 text-xs text-gray-500">Seedling cost carried from seedbeds is shown as its own line above and is part of Direct cost. Shared costs (curing, grading, overheads…) are spread under Finance → Profitability → Allocation rules.</p></Section>
     </>
   )
 }

@@ -49,5 +49,11 @@ describe('Seedling cost in field cost reports (UI)', () => {
     await u.click(screen.getByRole('link', { name: 'Fields' })); await screen.findByRole('heading', { name: 'Fields' })
     await u.click(screen.getByRole('link', { name: 'Open' })); await screen.findByRole('heading', { name: 'Field F-04' })
     const stat = (await screen.findByText('Seedling cost')).parentElement!; expect(stat.textContent).toMatch(/100/)
+    const direct = screen.getByText('Direct cost').parentElement!; expect(direct.textContent).toMatch(/includes .*100.* seedling cost/)
+
+    // without finance.cost.view neither stat is shown
+    const c = ctx(); useApp.setState({ ctx: { ...c, perms: new Set(['production.field.view', 'production.transplant.view']) } as typeof c }); useApp.getState().bump()
+    await screen.findByRole('heading', { name: 'Field F-04' }); await vi.waitFor(() => expect(screen.queryByText('Seedling cost')).toBeNull())
+    expect(screen.queryByText('Direct cost')).toBeNull()
   }, 60000)
 })

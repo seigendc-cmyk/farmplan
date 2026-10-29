@@ -56,14 +56,17 @@ export function fieldRecord(ctx: Ctx, fieldNo: string, seasonId?: string) {
   // Profit needs one season: revenue is booked to a bale's dominant field, and shared costs are allocated per season.
   const profit = sid && money ? profitability(ctx, sid).by_field.find(f => f.field_no === field.field_no) ?? null : null
   /** Seedling cost carried to this field from seedbeds (needs one season and cost access); null when unknown (pending) or not applicable. Shown beside direct cost, already inside field cost in Profitability. */
-  const seedling_cost = sid && money ? seedlingAttributionRaw(ctx, sid).find(r => r.field_id === field.id)?.amount ?? null : null
+  const seedRow = sid && money ? seedlingAttributionRaw(ctx, sid).find(r => r.field_id === field.id) ?? null : null
+  const seedling_cost = seedRow ? seedRow.amount : null; const seedling_pending = seedRow?.pending_count ?? 0
+  /** Same definition as Profitability: costs booked to the field plus its attributed seedling cost (cost_entries alone stay in `cost`). */
+  const direct_cost = cost == null ? null : round2(cost + (seedling_cost ?? 0))
   const revenue = sid && sales ? revenueSummary(ctx, sid).by_field.find(r => r.key === field.field_no) ?? null : null
   return {
     field, transplants, operations, harvests, labour, machine, bales, weather, costs, contracts, activity,
     totals: {
       established, plants_per_ha: established == null ? null : per(established, field.area_ha),
       green_kg: green, green_kg_per_ha: green == null ? null : per(green, field.area_ha), rain_mm: rain,
-      cost, seedling_cost, cost_per_ha: cost == null ? null : per(cost, field.area_ha),
+      cost, seedling_cost, seedling_pending, direct_cost, direct_cost_per_ha: direct_cost == null ? null : per(direct_cost, field.area_ha), cost_per_ha: cost == null ? null : per(cost, field.area_ha),
       sold_kg: sales && sid ? revenue?.kg ?? 0 : null, net_revenue: finance && sid ? revenue?.net ?? 0 : null,
       shared_cost: profit?.allocated_cost ?? null, full_margin: finance ? profit?.full_margin ?? null : null,
     },

@@ -83,13 +83,13 @@ function attribute(ctx: Ctx, rows: TpRow[]): (number | null)[] {
   })
 }
 
-interface Grp { field_id: string; field_no: string; seedlings: number; sum: number; pending: boolean }
+interface Grp { field_id: string; field_no: string; seedlings: number; sum: number; pending: number }
 /** Groups transplants by field with per-transplant amounts (one shared computation for the cross-season and legacy reads). */
 function group(ctx: Ctx, rows: TpRow[]): Map<string, Grp> {
   const amounts = attribute(ctx, rows); const by = new Map<string, Grp>()
   rows.forEach((t, i) => {
-    const g = by.get(t.field_id) ?? { field_id: t.field_id, field_no: t.field_no ?? '', seedlings: 0, sum: 0, pending: false }
-    g.seedlings += t.qty; if (amounts[i] == null) g.pending = true; else g.sum += amounts[i]!
+    const g = by.get(t.field_id) ?? { field_id: t.field_id, field_no: t.field_no ?? '', seedlings: 0, sum: 0, pending: 0 }
+    g.seedlings += t.qty; if (amounts[i] == null) g.pending++; else g.sum += amounts[i]!
     by.set(t.field_id, g)
   })
   return by
@@ -104,29 +104,43 @@ const legacyRows = (ctx: Ctx, seasonId: string) => ctx.db.all<TpRow>(`${TP_SELEC
 export function seedlingCostByField(ctx: Ctx, cropSeasonId: string): { field_id: string; seedlings: number; amount: number | null; pending: boolean }[] {
   require(ctx, 'production.transplant.view')
   const show = can(ctx, 'finance.cost.view')
-  return [...group(ctx, crossRows(ctx, cropSeasonId)).values()].map(g => ({ field_id: g.field_id, seedlings: g.seedlings, amount: show && !g.pending ? round2(g.sum) : null, pending: g.pending }))
+  return [...group(ctx, crossRows(ctx, cropSeasonId)).values()].map(g => ({ field_id: g.field_id, seedlings: g.seedlings, amount: show && !g.pending ? round2(g.sum) : null, pending: g.pending > 0 }))
 }
 
-export interface SeedlingAttribution { field_id: string; field_no: string; seedlings: number; amount: number | null; cross_amount: number | null; pending: boolean }
+export interface SeedlingAttribution { field_id: string; field_no: string; seedlings: number; amount: number | null; cross_amount: number | null; pending: boolean; pending_count: number }
 /** Unmasked attribution of a season's fields (callers must already hold finance.cost.view). Both parts per field: legacy same-season transplants (crop_season_id NULL, season_id = the season;
- *  their cost is already in the season's total) and cross-season ones (crop_season_id = the season; cost lives in another season). A field is all-or-nothing: if any of its transplants is pending
- *  (source cost without a seedling count) amount and cross_amount are both null and pending is true, so a pending field adds nothing anywhere. */
+ *  their cost is already in the season's total) and cross-season ones (crop_season_id = the season; cost lives in another season). A pending transplant (source cost without a seedling count)
+ *  adds nothing, but the field's other transplants still count: amount / cross_amount are the known sums, pending_count the transplants left out (pending = pending_count > 0, i.e. "partial"). */
 export function seedlingAttributionRaw(ctx: Ctx, seasonId: string): SeedlingAttribution[] {
   const cross = group(ctx, crossRows(ctx, seasonId)); const legacy = group(ctx, legacyRows(ctx, seasonId))
   const ids = new Map<string, string>(); for (const g of [...cross.values(), ...legacy.values()]) ids.set(g.field_id, g.field_no)
   return [...ids.entries()].sort((a, b) => a[1].localeCompare(b[1])).map(([field_id, field_no]) => {
-    const c = cross.get(field_id), l = legacy.get(field_id); const pending = !!(c?.pending || l?.pending)
-    return { field_id, field_no, seedlings: (c?.seedlings ?? 0) + (l?.seedlings ?? 0), pending,
-      amount: pending ? null : round2((c?.sum ?? 0) + (l?.sum ?? 0)), cross_amount: pending ? null : round2(c?.sum ?? 0) }
+    const c = cross.get(field_id), l = legacy.get(field_id); const pending_count = (c?.pending ?? 0) + (l?.pending ?? 0)
+    return { field_id, field_no, seedlings: (c?.seedlings ?? 0) + (l?.seedlings ?? 0), pending: pending_count > 0, pending_count,
+      amount: round2((c?.sum ?? 0) + (l?.sum ?? 0)), cross_amount: round2(c?.sum ?? 0) }
   })
 }
 
-/** Seedling cost attributed to each field for a season, legacy and cross-season together (Task 9 reports). amount / cross_amount are null when pending or without finance.cost.view.
+/** Seedling cost attributed to each field for a season, legacy and cross-season together (Task 9 reports). amount / cross_amount are null without finance.cost.view.
  *  cross_amount is the part whose seedbed lives in another season (the profitability transfer_in). */
-export function seedlingAttribution(ctx: Ctx, seasonId: string): { field_id: string; seedlings: number; amount: number | null; cross_amount: number | null; pending: boolean }[] {
+export function seedlingAttribution(ctx: Ctx, seasonId: string): { field_id: string; seedlings: number; amount: number | null; cross_amount: number | null; pending: boolean; pending_count: number }[] {
   require(ctx, 'production.transplant.view')
   const show = can(ctx, 'finance.cost.view')
   return seedlingAttributionRaw(ctx, seasonId).map(({ field_no: _n, ...r }) => show ? r : { ...r, amount: null, cross_amount: null })
+}
+
+/** Legacy same-season seedbed cost already attributed to fields, by cost category (known transplants only, pending ones stay in the pool). Each transplant's amount is split over the categories
+ *  of the bed's own cost entries up to its date (splitByWeight, exact cents). Allocation takes this out of the shared pool so the attributed part is not counted again as shared cost.
+ *  Unguarded: callers must hold finance.cost.view. */
+export function legacyAttributedByCategory(ctx: Ctx, seasonId: string): Map<string, number> {
+  const rows = legacyRows(ctx, seasonId); const amounts = attribute(ctx, rows); const out = new Map<string, number>()
+  rows.forEach((t, i) => {
+    const amt = amounts[i]; if (!amt) return
+    const cats = ctx.db.all<{ category: string; a: number }>(`SELECT category, SUM(amount) a FROM cost_entries WHERE farm_id=? AND seedbed_id=? AND field_id IS NULL AND deleted_at IS NULL AND occurred_on<=? GROUP BY category ORDER BY category`, [ctx.farmId, t.seedbed_id, t.occurred_on])
+    const parts = splitByWeight(amt, cats.map(c => Math.max(c.a, 0)))
+    cats.forEach((c, k) => out.set(c.category, round2((out.get(c.category) ?? 0) + parts[k])))
+  })
+  return out
 }
 
 /** The seedbed's total unit cost (all dates) less the amounts its transplants carried to fields (every live transplant of the bed, legacy ones too).
