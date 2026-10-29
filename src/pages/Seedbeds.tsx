@@ -26,12 +26,12 @@ const summaryTone = (st: string[]) => (st.every(x => x === 'ready') ? 'green' : 
 export default function Seedbeds() {
   const ctx = useCtx(); const can = useCan(); const run = useRun()
   const allSeasons = useData(c => listSeasons(c)) ?? []; const module = useData(c => currentModule(c)) ?? 'tobacco'
-  // In the Seedbed module only its own seasons are offered (when it has none yet, every season, as before); the Tobacco module keeps the legacy view of all seasons.
-  const own = allSeasons.filter(s => s.enterprise === module); const seasons = module === 'seedbed' && own.length ? own : allSeasons
+  // In the Seedbed module only its own seasons are offered (none yet: nothing to list and no new seedbeds until one is created, so seedbed work stays in the seedbed enterprise); the Tobacco module keeps the legacy view of all seasons.
+  const own = allSeasons.filter(s => s.enterprise === module); const seasons = module === 'seedbed' ? own : allSeasons
   const active = seasons.find(s => s.status === 'active')
   const [seasonId, setSeasonId] = useState<string>('')
-  const sid = seasonId || active?.id || seasons[0]?.id || ''
-  const rows = useData(c => listSeedbeds(c, sid || undefined), [sid])
+  const sid = (seasons.some(x => x.id === seasonId) ? seasonId : '') || active?.id || seasons[0]?.id || ''   // a pick from another module's list is ignored
+  const rows = useData(c => module === 'seedbed' && !sid && can('settings.season.view') ? [] : listSeedbeds(c, sid || undefined), [sid, module, can('settings.season.view')])
   const [edit, setEdit] = useState<Draft | null>(null)
   const [diary, setDiary] = useState<SeedbedMetrics | null>(null)
   const [recording, setRecording] = useState<SeedbedMetrics | null>(null)
@@ -61,7 +61,7 @@ export default function Seedbeds() {
       <PageHeader title="Seedbeds" sub="Register, diary and seedling output per bed"
         actions={<>{seasons.length > 0 && <Select value={sid} onChange={e => setSeasonId(e.target.value)} className="w-40">{seasons.map(s => <option key={s.id} value={s.id}>{s.label}</option>)}</Select>}
           {manage && <Button variant="primary" disabled={!sid} onClick={() => setEdit({ season_id: sid, kind: 'open_bed', bed_count: 1, status: 'prepared', prepared_on: today(), code: nextSeedbedCode(ctx, sid, 'open_bed') })}>New seedbed</Button>}</>} />
-      {!seasons.length && <Card className="p-4 mb-4 border-amber-300 bg-amber-50 text-amber-900">Create a season first (Settings → Seasons).</Card>}
+      {!seasons.length && <Card className="p-4 mb-4 border-amber-300 bg-amber-50 text-amber-900">{module === 'seedbed' ? 'Create a seedbed season first (Settings → Seasons).' : 'Create a season first (Settings → Seasons).'}</Card>}
       <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 mb-4">
         <Stat label="Seedbeds" value={rows.length} /><Stat label="Seedlings produced" value={fmt.num(totalSeedlings)} />
         <Stat label="Total area" value={`${fmt.num(rows.reduce((s, r) => s + (r.area_m2 ?? 0), 0))} m²`} />

@@ -30,8 +30,8 @@ describe('Float bays and trays UI', () => {
     await u.type(await screen.findByLabelText('Name'), 'Lovemore'); await u.type(screen.getByLabelText('PIN'), '1234'); await u.click(screen.getByRole('button', { name: 'Sign in' }))
     await screen.findByRole('navigation', { name: 'Main' })
     const ctx = () => useApp.getState().ctx!
-    const season = createSeason(ctx(), { label: '2026/27', starts_on: '2026-09-01', ends_on: '2027-08-31', activate: true })
     ctx().db.update('farms', ctx().farmId, { modules: 'tobacco,seedbed' }); useApp.getState().setModule('seedbed')
+    const season = createSeason(ctx(), { label: '2026/27', starts_on: '2026-09-01', ends_on: '2027-08-31', activate: true, enterprise: 'seedbed' })
     await u.click(await screen.findByRole('link', { name: 'Seedbeds' })); await screen.findByRole('heading', { name: 'Seedbeds' })
 
     // an open bed is created exactly as before (Kind defaults to Open bed, dimension fields shown)

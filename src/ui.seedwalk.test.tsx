@@ -13,7 +13,7 @@ vi.mock('sql.js', async () => {
 Object.defineProperty(globalThis, 'crypto', { value: webcrypto, configurable: true })
 window.confirm = () => true
 
-import { render, screen, within } from '@testing-library/react'
+import { render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import App from './App'
 import { useApp } from './store/app'
@@ -30,8 +30,11 @@ describe('Seedbeds page in a multi-module farm (walk-through D2, D7, D9)', () =>
     await u.type(await screen.findByLabelText('Name'), 'Lovemore'); await u.type(screen.getByLabelText('PIN'), '1234'); await u.click(screen.getByRole('button', { name: 'Sign in' }))
     await screen.findByRole('navigation', { name: 'Main' })
     const ctx = () => useApp.getState().ctx!
-    ctx().db.update('farms', ctx().farmId, { modules: 'tobacco,seedbed' })
-    createSeason(ctx(), { label: '2026/27', starts_on: '2026-09-01', ends_on: '2027-08-31', activate: true, enterprise: 'tobacco' })
+    ctx().db.update('farms', ctx().farmId, { modules: 'tobacco,seedbed' }); useApp.getState().setModule('seedbed')
+    // R6: with no seedbed season the Seedbed module cannot create beds (and lists none), even though a tobacco season is active
+    createSeason(ctx(), { label: '2026/27', starts_on: '2026-09-01', ends_on: '2027-08-31', activate: true, enterprise: 'tobacco' }); useApp.getState().bump()
+    await u.click(await screen.findByRole('link', { name: 'Seedbeds' })); await screen.findByRole('heading', { name: 'Seedbeds' })
+    expect((screen.getByRole('button', { name: 'New seedbed' }) as HTMLButtonElement).disabled).toBe(true); screen.getByText(/Create a seedbed season first/)
     const sb = createSeason(ctx(), { label: 'SB 2026', starts_on: '2026-08-01', ends_on: '2026-11-30', activate: true, enterprise: 'seedbed' })
     const bay = createSeedbed(ctx(), { season_id: sb, code: 'BAY-001', kind: 'float_bay' })
     const tt = saveTrayType(ctx(), { name: '200-cell', cells: 200, length_mm: null, width_mm: null, media: null, note: null })
@@ -39,7 +42,7 @@ describe('Seedbeds page in a multi-module farm (walk-through D2, D7, D9)', () =>
     useApp.getState().setModule('seedbed'); useApp.getState().bump()
 
     // Seedbed module: the picker lists only seedbed seasons and defaults to the active one; leaving and coming back keeps the bay on screen
-    await u.click(await screen.findByRole('link', { name: 'Seedbeds' })); await screen.findByRole('heading', { name: 'Seedbeds' })
+    await screen.findByRole('option', { name: 'SB 2026' })
     const picker = () => (screen.getAllByRole('combobox') as HTMLSelectElement[]).find(c => Array.from(c.options).some(o => /SB 2026|2026\/27/.test(o.text)))!
     expect(Array.from(picker().options).map(o => o.text)).toEqual(['SB 2026']); expect(picker().selectedOptions[0].text).toBe('SB 2026')
     let row = (await screen.findByText('BAY-001')).closest('tr')!
@@ -64,5 +67,9 @@ describe('Seedbeds page in a multi-module farm (walk-through D2, D7, D9)', () =>
     useApp.getState().setModule('tobacco'); useApp.getState().bump()
     await screen.findByRole('heading', { name: 'Seedbeds' })
     expect(Array.from(picker().options).map(o => o.text).sort()).toEqual(['2026/27', 'SB 2026']); expect(picker().selectedOptions[0].text).toBe('2026/27')
+    // a season picked in Tobacco must not stick when the module changes: the Seedbed module falls back to its own default
+    await u.selectOptions(picker(), (Array.from(picker().options).find(o => o.text === '2026/27'))!.value)
+    useApp.getState().setModule('seedbed'); useApp.getState().bump()
+    await waitFor(() => expect(Array.from(picker().options).map(o => o.text)).toEqual(['SB 2026'])); await screen.findByText('BAY-001')
   })
 })
