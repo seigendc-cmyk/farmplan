@@ -17,6 +17,7 @@ import Funding from './pages/Funding'
 import Fields from './pages/Fields'
 import FieldRecord from './pages/FieldRecord'
 import Seedbeds from './pages/Seedbeds'
+import TrayTypes from './pages/TrayTypes'
 import Operations from './pages/Operations'
 import Inventory from './pages/Inventory'
 import Costs from './pages/Costs'
@@ -174,6 +175,7 @@ function Shell() {
           <Routes>
             <Route path="/" element={<Dashboard />} />
             <Route path="/seedbeds" element={<Seedbeds />} />
+            <Route path="/tray-types" element={<TrayTypes />} />
             <Route path="/fields" element={<Fields />} />
             <Route path="/fields/:fieldNo" element={<FieldRecord />} />
             <Route path="/operations" element={<Operations />} />
