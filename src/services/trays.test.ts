@@ -83,6 +83,28 @@ describe('trays', () => {
     expect(() => updateTray(o, a, { actual_seedlings: 59 })).toThrow(/transplanted/)
     updateTray(o, a, { actual_seedlings: 60 }); expect(listTrays(o, bay)[0].actual_seedlings).toBe(60)
   })
+  it('edit with empty counts: status change on an uncounted tray, clearing expected and actual', () => {
+    const a = createTray(o, { seedbed_id: bay, tray_type_id: tt, variety: 'K' })
+    updateTray(o, a, { status: 'germinating', variety: undefined, sown_on: undefined, expected_seedlings: undefined, actual_seedlings: undefined })
+    expect(listTrays(o, bay)[0]).toMatchObject({ status: 'germinating', variety: null, expected_seedlings: null, actual_seedlings: null })
+    updateTray(o, a, { actual_seedlings: 90, expected_seedlings: 150, variety: 'K' }); updateTray(o, a, { status: 'growing' })
+    expect(listTrays(o, bay)[0]).toMatchObject({ status: 'growing', variety: 'K', expected_seedlings: 150, actual_seedlings: 90 })
+    updateTray(o, a, { expected_seedlings: null }); expect(listTrays(o, bay)[0]).toMatchObject({ expected_seedlings: null, actual_seedlings: 90 })
+    updateTray(o, a, { actual_seedlings: null }); expect(listTrays(o, bay)[0]).toMatchObject({ actual_seedlings: null, available: null })
+  })
+  it('clearing the count is refused once seedlings were transplanted from the tray', () => {
+    const a = createTray(o, { seedbed_id: bay, tray_type_id: tt, actual_seedlings: 100 })
+    db.run(`INSERT INTO transplants(id,tenant_id,farm_id,season_id,seedbed_id,field_id,occurred_on,qty,tray_id) VALUES('t1',?,?,?,?,?,'2026-10-01',10,?)`, [o.tenantId, o.farmId, season, bay,
+      db.insert('fields', { tenant_id: o.tenantId, farm_id: o.farmId, field_no: 'F1', area_ha: 1 }), a])
+    expect(() => updateTray(o, a, { actual_seedlings: null })).toThrow(/cannot be cleared/)
+    expect(() => updateTray(o, a, { actual_seedlings: undefined })).toThrow(/cannot be cleared/)
+    updateTray(o, a, { status: 'ready' }); expect(listTrays(o, bay)[0]).toMatchObject({ actual_seedlings: 100, status: 'ready' })
+  })
+  it('a reused code names the removed tray', () => {
+    const a = createTray(o, { seedbed_id: bay, tray_type_id: tt, code: 'Z' }); deleteTray(o, a)
+    expect(() => createTray(o, { seedbed_id: bay, tray_type_id: tt, code: 'Z' })).toThrow(/removed tray/)
+    const b = createTray(o, { seedbed_id: bay, tray_type_id: tt, code: 'Y' }); expect(() => updateTray(o, b, { code: 'Z' })).toThrow(/removed tray/)
+  })
   it('delete: soft deletes, refused when an operation, cost or transplant references it', () => {
     const a = createTray(o, { seedbed_id: bay, tray_type_id: tt }); deleteTray(o, a); expect(listTrays(o, bay)).toEqual([])
     const c = createTray(o, { seedbed_id: bay, tray_type_id: tt, code: 'C' })

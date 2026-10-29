@@ -38,7 +38,7 @@ export default function Seedbeds() {
   const bay = rows.find(r => r.id === bayId) ?? null
   async function saveTray() {
     const t = tray!; const v = { tray_type_id: t.tray_type_id, code: t.code, variety: t.variety, sown_on: t.sown_on || undefined, expected_seedlings: t.expected_seedlings, actual_seedlings: t.actual_seedlings }
-    if (await run(() => t.id ? updateTray(ctx, t.id, { ...v, status: t.status }) : createTray(ctx, { ...v, seedbed_id: bay!.id }), t.id ? 'Tray updated' : 'Tray added')) setTray(null)
+    if (await run(() => t.id ? updateTray(ctx, t.id, { ...v, sown_on: t.sown_on || null, expected_seedlings: t.expected_seedlings ?? null, actual_seedlings: t.actual_seedlings ?? null, status: t.status }) : createTray(ctx, { ...v, seedbed_id: bay!.id }), t.id ? 'Tray updated' : 'Tray added')) setTray(null)
   }
   const editTray = (t: Tray) => setTray({ id: t.id, tray_type_id: t.tray_type_id, code: t.code, variety: t.variety ?? '', sown_on: t.sown_on ?? '', status: t.status, expected_seedlings: t.expected_seedlings ?? undefined, actual_seedlings: t.actual_seedlings ?? undefined })
   return (

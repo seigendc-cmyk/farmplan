@@ -7,7 +7,8 @@ export interface Tray {
   expected_seedlings: number | null; actual_seedlings: number | null; status: string; transplanted: number; available: number | null
 }
 export interface TrayInput { seedbed_id: string; tray_type_id: string; code?: string; variety?: string; sown_on?: string; expected_seedlings?: number; actual_seedlings?: number }
-export type TrayPatch = Partial<Omit<TrayInput, 'seedbed_id'>> & { status?: string }
+export type TrayPatch = Partial<Omit<TrayInput, 'seedbed_id' | 'variety' | 'sown_on' | 'expected_seedlings' | 'actual_seedlings'>>
+  & { variety?: string | null; sown_on?: string | null; expected_seedlings?: number | null; actual_seedlings?: number | null; status?: string }
 
 const count = (v: number | null | undefined, what: string) => {
   need(v == null || Number.isInteger(v), `${what} must be a whole number`); need(v == null || v >= 0, `${what} cannot be negative`)
@@ -28,7 +29,8 @@ export function createTray(ctx: Ctx, i: TrayInput): string {
   const type = ctx.db.get<{ cells: number }>(`SELECT cells FROM tray_types WHERE id=? AND farm_id=? AND deleted_at IS NULL`, [i.tray_type_id, ctx.farmId]); need(type, 'Select a tray type')
   need(!i.sown_on || isDate(i.sown_on), 'Invalid sowing date'); count(i.expected_seedlings, 'Expected seedlings'); count(i.actual_seedlings, 'Actual seedlings')
   const code = i.code?.trim() || nextTrayCode(ctx, i.seedbed_id)
-  need(!ctx.db.get(`SELECT 1 FROM seedbed_trays WHERE seedbed_id=? AND code=?`, [i.seedbed_id, code]), `Tray ${code} already exists in ${bay.code}`)
+  const clash = ctx.db.get<{ deleted_at: string | null }>(`SELECT deleted_at FROM seedbed_trays WHERE seedbed_id=? AND code=?`, [i.seedbed_id, code])
+  need(!clash, clash?.deleted_at ? `Code ${code} was used by a removed tray in ${bay.code}; use another code` : `Tray ${code} already exists in ${bay.code}`)
   return ctx.db.tx(() => {
     const id = ctx.db.insert('seedbed_trays', { tenant_id: ctx.tenantId, farm_id: ctx.farmId, seedbed_id: i.seedbed_id, tray_type_id: i.tray_type_id, code, variety: blank(i.variety),
       sown_on: i.sown_on || null, expected_seedlings: i.expected_seedlings ?? type.cells, actual_seedlings: i.actual_seedlings ?? null, status: 'sown' })
@@ -40,13 +42,18 @@ export function updateTray(ctx: Ctx, id: string, i: TrayPatch): void {
   require(ctx, 'production.seedbed.edit')
   const cur = ctx.db.get<{ seedbed_id: string; tray_type_id: string; code: string; variety: string | null; sown_on: string | null; expected_seedlings: number | null; actual_seedlings: number | null; status: string }>(
     `SELECT seedbed_id, tray_type_id, code, variety, sown_on, expected_seedlings, actual_seedlings, status FROM seedbed_trays WHERE id=? AND farm_id=? AND deleted_at IS NULL`, [id, ctx.farmId]); need(cur, 'Tray not found')
-  const m = { ...cur, ...i }
+  // An explicit undefined/null on a nullable field clears it; an absent key keeps the stored value.
+  const keep = <K extends 'variety' | 'sown_on' | 'expected_seedlings' | 'actual_seedlings'>(k: K) => (k in i ? i[k] ?? null : cur[k]) as (typeof cur)[K]
+  const m = { ...cur, tray_type_id: i.tray_type_id ?? cur.tray_type_id, code: i.code ?? cur.code, status: i.status ?? cur.status,
+    variety: keep('variety'), sown_on: keep('sown_on'), expected_seedlings: keep('expected_seedlings'), actual_seedlings: keep('actual_seedlings') }
   need(m.code?.trim(), 'Code is required'); need((TRAY_STATUSES as readonly string[]).includes(m.status), 'Invalid tray status')
   need(ctx.db.get(`SELECT 1 FROM tray_types WHERE id=? AND farm_id=? AND deleted_at IS NULL`, [m.tray_type_id, ctx.farmId]), 'Select a tray type')
   need(!m.sown_on || isDate(m.sown_on), 'Invalid sowing date'); count(m.expected_seedlings, 'Expected seedlings'); count(m.actual_seedlings, 'Actual seedlings')
   const code = m.code.trim()
-  need(!ctx.db.get(`SELECT 1 FROM seedbed_trays WHERE seedbed_id=? AND code=? AND id<>?`, [cur.seedbed_id, code, id]), `Tray ${code} already exists in this bay`)
+  const clash = ctx.db.get<{ deleted_at: string | null }>(`SELECT deleted_at FROM seedbed_trays WHERE seedbed_id=? AND code=? AND id<>?`, [cur.seedbed_id, code, id])
+  need(!clash, clash?.deleted_at ? `Code ${code} was used by a removed tray in this bay; use another code` : `Tray ${code} already exists in this bay`)
   const tp = transplantedOf(ctx, id)
+  need(m.actual_seedlings != null || tp === 0, `${tp} seedlings from ${code} are already transplanted; the count cannot be cleared`)
   need(m.actual_seedlings == null || m.actual_seedlings >= tp, `${tp} seedlings from ${code} are already transplanted; the count cannot be below that`)
   ctx.db.tx(() => {
     ctx.db.update('seedbed_trays', id, { tray_type_id: m.tray_type_id, code, variety: blank(m.variety), sown_on: m.sown_on || null,

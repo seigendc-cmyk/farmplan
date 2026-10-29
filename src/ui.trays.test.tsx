@@ -80,6 +80,22 @@ describe('Float bays and trays UI', () => {
     await u.click(within(screen.getByRole('dialog', { name: 'BAY1 — trays' })).getByRole('button', { name: 'Close' }))
     within(screen.getByText('BAY1').closest('tr')!).getByText('170')
 
+    // edit an uncounted tray: change status and clear Expected, both succeed
+    {
+      const id2 = (await import('./services/trays')).createTray(ctx(), { seedbed_id: bay.id, tray_type_id: listTrayTypesId(ctx()), code: 'U1' }); useApp.getState().bump()
+      await u.click(within(screen.getByText('BAY1').closest('tr')!).getByRole('button', { name: 'Trays BAY1' }))
+      const dd = await screen.findByRole('dialog', { name: 'BAY1 — trays' }); await u.click(await within(dd).findByRole('button', { name: 'Edit U1' }))
+      let g = await screen.findByRole('dialog', { name: 'Edit U1' })
+      await u.selectOptions(within(g).getByLabelText('Status'), 'germinating'); await u.click(within(g).getByRole('button', { name: 'Save tray' })); await screen.findAllByText('Tray updated')
+      expect(listTrays(ctx(), bay.id).find(t => t.id === id2)).toMatchObject({ status: 'germinating', actual_seedlings: null, expected_seedlings: 200 })
+      await u.click(within(screen.getByRole('dialog', { name: 'BAY1 — trays' })).getByRole('button', { name: 'Edit U1' })); g = await screen.findByRole('dialog', { name: 'Edit U1' })
+      await u.clear(within(g).getByLabelText('Expected seedlings')); await u.click(within(g).getByRole('button', { name: 'Save tray' }))
+      await vi.waitFor(() => expect(screen.queryByRole('dialog', { name: 'Edit U1' })).toBeNull())
+      expect(listTrays(ctx(), bay.id).find(t => t.id === id2)).toMatchObject({ status: 'germinating', expected_seedlings: null })
+      ctx().db.softDelete('seedbed_trays', id2); useApp.getState().bump()
+      await u.click(within(screen.getByRole('dialog', { name: 'BAY1 — trays' })).getByRole('button', { name: 'Close' }))
+    }
+
     // remove a tray
     await u.click(within(screen.getByText('BAY1').closest('tr')!).getByRole('button', { name: 'Trays BAY1' })); d = await screen.findByRole('dialog', { name: 'BAY1 — trays' })
     await u.click(within(d).getByRole('button', { name: 'Remove T-001' })); await screen.findByText('Tray removed')
@@ -90,8 +106,8 @@ describe('Float bays and trays UI', () => {
     const full = ctx(); const keep = (await import('./services/trays')).createTray(full, { seedbed_id: bay.id, tray_type_id: listTrayTypesId(full) }); useApp.getState().bump()
     useApp.setState({ ctx: { ...full, perms: new Set(['production.seedbed.view']) } })
     await u.click(await screen.findByRole('button', { name: 'Trays BAY1' })); d = await screen.findByRole('dialog', { name: 'BAY1 — trays' })
-    within(d).getByText('T-002'); expect(keep).toBeTruthy()
-    expect(within(d).queryByRole('button', { name: 'Add tray' })).toBeNull(); expect(within(d).queryByRole('button', { name: 'Edit T-002' })).toBeNull(); expect(within(d).queryByRole('button', { name: 'Remove T-002' })).toBeNull()
+    within(d).getByText('T-003'); expect(keep).toBeTruthy()
+    expect(within(d).queryByRole('button', { name: 'Add tray' })).toBeNull(); expect(within(d).queryByRole('button', { name: 'Edit T-003' })).toBeNull(); expect(within(d).queryByRole('button', { name: 'Remove T-003' })).toBeNull()
     useApp.setState({ ctx: full })
   }, 40000)
 })
