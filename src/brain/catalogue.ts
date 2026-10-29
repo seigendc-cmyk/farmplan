@@ -4,6 +4,9 @@ import { buyerAgeing } from '../services/buyers'
 import { listContracts } from '../services/contracts'
 import { listInputs } from '../services/inventory'
 import { listSeedbeds } from '../services/seedbeds'
+import { listTrays } from '../services/trays'
+import { seedbedUnitCosts } from '../services/seedlingcost'
+import { listOperations } from '../services/operations'
 import { listStorage } from '../services/storage'
 import { listMachines } from '../services/machinery'
 
@@ -26,6 +29,8 @@ export type RawParams = Record<string, unknown>
 const seasonOf = (p: Resolved) => String(p.season)
 /** The resolved season label back to its id, for lookups that read through a service. */
 const seasonIdOf = (c: Ctx, p: Resolved) => c.db.get<{ id: string }>(`SELECT id FROM seasons WHERE farm_id=? AND label=? AND deleted_at IS NULL`, [c.farmId, seasonOf(p)])?.id
+/** One row per cost unit (tray of a float bay, or a whole open bed) of every seedbed in the season. Money and per_seedling come only from seedbedUnitCosts. */
+const unitRows = (c: Ctx, p: Resolved) => listSeedbeds(c, seasonIdOf(c, p)).flatMap(b => seedbedUnitCosts(c, b.id).map(u => ({ seedbed: b.code, unit: u.unit === 'bed' ? 'whole bed' : u.code, u })))
 const todayIso = () => new Date().toISOString().slice(0, 10)
 const byView = (view: string, perms: string[]) => ({ sources: [{ kind: 'view', ref: view } as Source], perms })
 
@@ -98,6 +103,22 @@ export const CATALOGUE: Question[] = [
   { id: 'seedbeds_status', title: 'Seedbeds', about: 'Seedbeds in a season with variety, sowing date, expected and actual seedlings, achievement and seedlings still available to transplant', keywords: ['seedbed', 'seedbeds', 'seedling', 'seedlings', 'nursery', 'germination', 'germinated', 'sown', 'sowing'],
     params: [{ name: 'season', type: 'season', optional: true, about: 'Season label; defaults to the active season' }], sources: [{ kind: 'view', ref: 'seedbeds' }], perms: ['production.seedbed.view'],
     run: (c, p) => listSeedbeds(c, seasonIdOf(c, p)).map(s => ({ seedbed: s.code, variety: s.variety, sown: s.sown_on, expected: s.expected_seedlings, actual: s.actual_seedlings, achieved_pct: s.achievement_pct, available: s.available_seedlings, status: s.status })) },
+  // Seedbed cost and tray lookups. Same services as the Seedbeds, Trays and Operations pages; the two cost lookups also need finance.cost.view. Pending prints the word "pending", never a number.
+  { id: 'seedbed_cost', title: 'Seedbed cost', about: 'What each seedbed has cost in a season: for a float bay one row per tray (bay-level cost shared by seedlings), for an open bed one row, with the seedling count and the cost', keywords: ['+seedbed cost', '+seedbeds cost', '+cost of the seedbeds', '+cost of seedbeds', '+cost of the seedbed', '+bay cost', '+spent on the seedbeds', '+spent on seedbeds', '+spent on the nursery', '+nursery cost', '+seedbed spend'],
+    params: [{ name: 'season', type: 'season', optional: true, about: 'Season label; defaults to the active season' }], sources: [{ kind: 'view', ref: 'seedbed costs' }], perms: ['finance.cost.view', 'production.seedbed.view'],
+    run: (c, p) => unitRows(c, p).map(({ seedbed, unit, u }) => ({ seedbed, unit, seedlings: u.seedlings, cost: u.cost })) },
+  { id: 'cost_per_seedling', title: 'Cost per seedling', about: 'Cost of one seedling for each tray of a float bay or each open bed in a season, or pending when there is cost but no seedling count yet', keywords: ['+cost per seedling', '+per seedling', '+seedling cost', '+cost of a seedling', '+cost of one seedling', '+each seedling cost', '+cost each seedling'],
+    params: [{ name: 'season', type: 'season', optional: true, about: 'Season label; defaults to the active season' }], sources: [{ kind: 'view', ref: 'seedbed costs' }], perms: ['finance.cost.view', 'production.seedbed.view'],
+    run: (c, p) => unitRows(c, p).map(({ seedbed, unit, u }) => ({ seedbed, unit, per_seedling: u.pending ? 'pending' : u.per_seedling })) },
+  { id: 'tray_survival', title: 'Tray survival', about: 'For each float bay tray in a season: sowing date, seedlings counted, seedlings transplanted so far and, once the tray is depleted or abandoned, the share of seedlings that were never transplanted (mortality)', keywords: ['+tray', '+trays', '+survival', '+survived', '+mortality', '+died', '+dead'],
+    params: [{ name: 'season', type: 'season', optional: true, about: 'Season label; defaults to the active season' }], sources: [{ kind: 'view', ref: 'seedbed trays' }], perms: ['production.seedbed.view'],
+    run: (c, p) => listSeedbeds(c, seasonIdOf(c, p)).filter(b => b.kind === 'float_bay').flatMap(b => listTrays(c, b.id).map(t => ({ seedbed: b.code, tray: t.code, sown: t.sown_on, actual: t.actual_seedlings, transplanted: t.transplanted, status: t.status,
+      mortality_pct: (t.status === 'depleted' || t.status === 'abandoned') && t.actual_seedlings ? Math.round(Math.max(0, t.actual_seedlings - t.transplanted) / t.actual_seedlings * 1000) / 10 : null }))) },
+  { id: 'bay_operations', title: 'Float bay operations', about: 'Work done in the float bay (filling, seeding, water top-ups, clipping, hardening, cleaning) with date, type and tray; latest first, optionally only the last few days. No prices.', keywords: ['+float bay', '+float water', '+float bays', 'in the bay', 'tray filling', 'top up', 'topped up'],
+    params: [{ name: 'season', type: 'season', optional: true, about: 'Season label; defaults to the active season' }, { name: 'days', type: 'number', optional: true, about: 'How many days back; default the whole season' }], sources: [{ kind: 'view', ref: 'operations' }], perms: ['production.operation.view', 'production.seedbed.view'],
+    run: (c, p) => { const sid = seasonIdOf(c, p); const from = p.days ? new Date(Date.now() - Number(p.days) * 864e5).toISOString().slice(0, 10) : ''
+      return listSeedbeds(c, sid).filter(b => b.kind === 'float_bay').flatMap(b => listOperations(c, { seasonId: sid, targetType: 'seedbed', targetId: b.id, limit: 1000 })).filter(r => r.occurred_on >= from)
+        .sort((a, b) => b.occurred_on.localeCompare(a.occurred_on)).slice(0, 30).map(r => ({ date: r.occurred_on, type: r.op_type, tray: r.tray_code ?? 'whole bay' })) } },
   { id: 'storage_ready', title: 'Storage ready to open', about: 'Slate packs and piles still maturing: which are ready to open for grading and how many days the rest need', keywords: ['storage', 'stored', 'starking', 'slate', 'slates', 'pile', 'piles', 'maturing', 'matured', 'ready to open', 'open for grading', 'ready for grading'],
     params: [], sources: [{ kind: 'view', ref: 'storage units' }], perms: ['curing.storage.view'],
     run: c => listStorage(c).filter(u => u.status === 'maturing').sort((a, b) => a.days_to_open - b.days_to_open)
