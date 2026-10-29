@@ -54,6 +54,9 @@ const NAV: { group: string; module?: string; items: NavItem[] }[] = [
     { to: '/seedbeds', label: 'Seedbeds', perm: 'production.seedbed.view' }, { to: '/fields', label: 'Fields', perm: 'production.field.view' },
     { to: '/operations', label: 'Operations', perm: 'production.operation.view' },
     { to: '/transplanting', label: 'Transplanting', perm: 'production.transplant.view' }, { to: '/harvest', label: 'Harvest', perm: 'production.harvest.view' }] },
+  { group: 'Seedbeds', module: 'seedbed', items: [
+    { to: '/seedbeds', label: 'Seedbeds', perm: 'production.seedbed.view' }, { to: '/tray-types', label: 'Tray types', perm: 'production.seedbed.view' },
+    { to: '/operations', label: 'Operations', perm: 'production.operation.view' }, { to: '/transplanting', label: 'Transplanting', perm: 'production.transplant.view' }] },
   { group: 'Curing', module: 'tobacco', items: [{ to: '/barns', label: 'Barns', perm: 'curing.barn.view' }, { to: '/curing', label: 'Curing cycles', perm: 'curing.cycle.view' }, { to: '/starking', label: 'Starking', perm: 'curing.storage.view' }] },
   { group: 'Quality', module: 'tobacco', items: [{ to: '/grading', label: 'Grading', perm: 'quality.grading.view' }, { to: '/bales', label: 'Bales', perm: 'quality.bale.view' }] },
   { group: 'Marketing', module: 'tobacco', items: [{ to: '/sales', label: 'Sales', perm: 'marketing.sale.view' }, { to: '/buyers', label: 'Buyers', perm: 'marketing.buyer.view' }] },

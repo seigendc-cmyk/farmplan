@@ -17,7 +17,7 @@ export function currentModule(ctx: Ctx): string {
  * Enabled modules this person can use. Tobacco is open to everyone who can sign in, as before. Each later module will list the permission
  * prefixes that grant it (see MODULE_ACCESS); until a module has an entry here nobody but an owner reaches it.
  */
-export const MODULE_ACCESS: Record<string, readonly string[] | 'all'> = { tobacco: 'all' }
+export const MODULE_ACCESS: Record<string, readonly string[] | 'all'> = { tobacco: 'all', seedbed: ['production.seedbed'] }
 export function accessibleModules(ctx: Ctx, can: (perm: string) => boolean): string[] {
   return enabledModules(ctx).filter(id => {
     const rule = MODULE_ACCESS[id]

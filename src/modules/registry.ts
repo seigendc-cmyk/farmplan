@@ -6,6 +6,7 @@ export interface ModuleDef { id: string; label: string; blurb: string; available
 
 export const MODULES: readonly ModuleDef[] = [
   { id: 'tobacco', label: 'Tobacco', blurb: 'Seedbeds to sale: curing, grading, bales and contract farming.', available: true },
+  { id: 'seedbed', label: 'Seedbeds', blurb: 'Seedbeds and float tray bays: seedlings with full costing, supplied to crop modules.', available: true },
   { id: 'horticulture', label: 'Horticulture', blurb: 'Vegetable crop cycles, pack shed and market orders.', available: false },
   { id: 'orchards', label: 'Orchards', blurb: 'Granadilla, berries and long-term trees.', available: false },
   { id: 'field_crops', label: 'Field crops', blurb: 'Maize, soya beans and other seasonal field crops.', available: false },

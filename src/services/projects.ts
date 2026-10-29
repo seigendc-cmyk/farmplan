@@ -32,6 +32,13 @@ const LEAVE: Record<string, Record<string, (db: Db, p: Gate) => string | null>> 
     harvest_curing: (db, p) => has(db, 'harvest_batches', p.season_id) ? null : 'Record at least one harvest batch',
     grading_marketing: (db, p) => !has(db, 'sales', p.season_id) ? 'Record at least one sale' : p.season_status !== 'closed' ? 'Close the season' : null,
   },
+  seedbed: {
+    budget: (db, p) => has(db, 'budget_versions', p.season_id) ? null : 'Approve the budget as the baseline',
+    funding: (db, p) => p.funding_not_needed || db.get(`SELECT 1 FROM funding_requests WHERE project_id=? AND deleted_at IS NULL LIMIT 1`, [p.id]) ? null : 'Raise a funding request, or mark that no funding is needed',
+    sowing: (db, p) => has(db, 'seedbeds', p.season_id) ? null : 'Record at least one seedbed or bay',
+    growing: (db, p) => db.get(`SELECT 1 FROM seedbeds WHERE season_id=? AND sown_on IS NOT NULL AND deleted_at IS NULL LIMIT 1`, [p.season_id]) ? null : 'Record a sowing date on a seedbed',
+    dispatched: (db, p) => has(db, 'transplants', p.season_id) ? null : "Record at least one transplant from this season's seedbeds",
+  },
 }
 const has = (db: Db, table: string, seasonId: string) => !!db.get(`SELECT 1 FROM ${table} WHERE season_id=? AND deleted_at IS NULL LIMIT 1`, [seasonId])
 

@@ -14,6 +14,17 @@ export const STAGES: Record<string, readonly StageDef[]> = {
     { id: 'grading_marketing', label: 'Grading and marketing', help: 'Grading lots, bales, sales, buyer deductions.' },
     { id: 'closed', label: 'Closed', help: 'Final budget against actual, season report.' },
   ],
+  seedbed: [
+    { id: 'idea', label: 'Idea', help: 'Which crops the seedlings are for, season, and how many seedlings are wanted.' },
+    { id: 'planning', label: 'Planning', help: 'Seedbeds and float tray bays, varieties, tray types and expected seedlings.' },
+    { id: 'budget', label: 'Budget', help: 'Initial budget built and approved.' },
+    { id: 'funding', label: 'Funding', help: 'Funding needs assessed; a request raised if cash or inputs are short.' },
+    { id: 'sowing', label: 'Sowing', help: 'Seedbeds and bays prepared, inputs received, seed sown.' },
+    { id: 'growing', label: 'Growing', help: 'Germination, watering, feeding, clipping and pest control.' },
+    { id: 'hardening', label: 'Hardening', help: 'Seedlings hardened off and counted ready for transplanting.' },
+    { id: 'dispatched', label: 'Dispatched', help: 'Seedlings supplied and transplanted to crop modules.' },
+    { id: 'closed', label: 'Closed', help: 'Final budget against actual, season report.' },
+  ],
 }
 
 export const stagesOf = (module: string): readonly StageDef[] => STAGES[module] ?? []
