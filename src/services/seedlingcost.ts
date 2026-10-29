@@ -67,3 +67,48 @@ export function costPerSeedling(ctx: Ctx, src: { seedbed_id: string; tray_id?: s
   const pending = units.some(u => u.pending) || (units.length === 0 && total !== 0)
   return { per_seedling: show && !pending && seedlings ? round4(total / seedlings) : null, pending }
 }
+
+/** Money for one transplant: round2(qty * unit cost / unit seedlings) from the source unit's cost as of the transplant date (never from the 4 dp per_seedling).
+ *  null = pending (the unit has cost but no seedling count, or the tray vanished). Transplant labour carries a field and is not part of unit cost. */
+interface TpRow { id: string; seedbed_id: string; tray_id: string | null; field_id: string; qty: number; occurred_on: string }
+function attribute(ctx: Ctx, rows: TpRow[]): (number | null)[] {
+  const cache = new Map<string, UnitCost[]>()
+  return rows.map(t => {
+    const key = t.seedbed_id + '|' + t.occurred_on
+    if (!cache.has(key)) cache.set(key, compute(ctx, t.seedbed_id, t.occurred_on).units)
+    const u = cache.get(key)!.find(x => (t.tray_id ? x.unit === 'tray' && x.id === t.tray_id : x.unit === 'bed'))
+    if (!u || u.pending) return null
+    if (!u.cost || !u.seedlings) return 0
+    return round2(t.qty * u.cost / u.seedlings)
+  })
+}
+
+/** Seedling cost carried to the fields of a crop season by cross-season transplants (crop_season_id = the season; gap-fill included). Derived on every call, nothing stored:
+ *  deleting a transplant removes its attribution. Legacy same-season transplants have no crop_season_id and are not here (their cost is already in the season).
+ *  A row is pending (amount null) when any contributing transplant's source cost has no seedling count. amount is also null without finance.cost.view. */
+export function seedlingCostByField(ctx: Ctx, cropSeasonId: string): { field_id: string; seedlings: number; amount: number | null; pending: boolean }[] {
+  require(ctx, 'production.transplant.view')
+  const rows = ctx.db.all<TpRow>(`SELECT t.id, t.seedbed_id, t.tray_id, t.field_id, t.qty, t.occurred_on FROM transplants t JOIN fields f ON f.id=t.field_id
+    WHERE t.farm_id=? AND t.crop_season_id=? AND t.deleted_at IS NULL ORDER BY f.field_no, t.occurred_on, t.created_at`, [ctx.farmId, cropSeasonId])
+  const amounts = attribute(ctx, rows); const show = can(ctx, 'finance.cost.view')
+  const by = new Map<string, { field_id: string; seedlings: number; sum: number; pending: boolean }>()
+  rows.forEach((t, i) => {
+    const g = by.get(t.field_id) ?? { field_id: t.field_id, seedlings: 0, sum: 0, pending: false }
+    g.seedlings += t.qty; if (amounts[i] == null) g.pending = true; else g.sum += amounts[i]!
+    by.set(t.field_id, g)
+  })
+  return [...by.values()].map(g => ({ field_id: g.field_id, seedlings: g.seedlings, amount: show && !g.pending ? round2(g.sum) : null, pending: g.pending }))
+}
+
+/** The seedbed's total unit cost (all dates) less the amounts its transplants carried to fields (every live transplant of the bed, legacy ones too).
+ *  Exact difference, not clamped: each transplant is rounded to cents on its own, so a few cents of drift is possible. null without finance.cost.view,
+ *  or when any transplant is pending (the split cannot be computed). */
+export function seedbedLoss(ctx: Ctx, seedbedId: string): number | null {
+  require(ctx, 'production.seedbed.view')
+  if (!can(ctx, 'finance.cost.view')) return null
+  const { total } = compute(ctx, seedbedId)
+  const rows = ctx.db.all<TpRow>(`SELECT id, seedbed_id, tray_id, field_id, qty, occurred_on FROM transplants WHERE farm_id=? AND seedbed_id=? AND deleted_at IS NULL`, [ctx.farmId, seedbedId])
+  const amounts = attribute(ctx, rows)
+  if (amounts.some(a => a == null)) return null
+  return round2(total - amounts.reduce<number>((s, a) => s + a!, 0))
+}
