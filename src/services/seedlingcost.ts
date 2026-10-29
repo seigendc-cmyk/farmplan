@@ -22,7 +22,7 @@ interface Computed { units: UnitCost[]; total: number }
 /** Raw (unmasked) units plus the bed's total cost, from one cost query. per_seedling is rounded to 4 dp for display only: callers that need money
  *  (Task 8 attribution) must multiply from cost / seedlings, or split with splitByWeight, never from the rounded per_seedling. */
 function compute(ctx: Ctx, seedbedId: string, asOf?: string): Computed {
-  need(asOf == null || isDate(asOf), 'Invalid date')
+  need(asOf == null || (isDate(asOf) && new Date(asOf).toISOString().slice(0, 10) === asOf), 'Invalid date')
   const { bed, own, shared } = load(ctx, seedbedId, asOf)
   const total = round2([...own.values()].reduce((s, v) => s + v, 0) + shared)
   const mk = (unit: 'tray' | 'bed', id: string, code: string, seedlings: number | null, amount: number): UnitCost => {
@@ -45,6 +45,7 @@ function compute(ctx: Ctx, seedbedId: string, asOf?: string): Computed {
 }
 
 /** Cost per unit of a bed. Open bed: one 'bed' unit. Float bay: one 'tray' unit per live tray, with bay-level cost split by actual seedlings (splitByWeight, cents sum exactly).
+ * per_seedling is a 4 dp display value: never multiply it for money; use cost / seedlings or splitByWeight.
  *  Derived on every call, nothing stored, so a changed tray count recomputes. Without finance.cost.view cost and per_seedling are null (seedlings and the real pending flag still shown). */
 export function seedbedUnitCosts(ctx: Ctx, seedbedId: string, asOf?: string): UnitCost[] {
   require(ctx, 'production.seedbed.view')
@@ -52,7 +53,7 @@ export function seedbedUnitCosts(ctx: Ctx, seedbedId: string, asOf?: string): Un
   return can(ctx, 'finance.cost.view') ? units : units.map(u => ({ ...u, cost: null, per_seedling: null }))
 }
 
-/** Cost per seedling of the tray (tray_id given) or of the open bed. A float bay without tray_id returns total bay cost (tray-own plus bay-level) / sum of tray counts,
+/** Cost per seedling of the tray (tray_id given) or of the open bed. The result is a 4 dp display value: never multiply it for money; use cost / seedlings or splitByWeight. A float bay without tray_id returns total bay cost (tray-own plus bay-level) / sum of tray counts,
  *  but only when no unit is pending: any non-zero cost without a count (or bay-level cost with no tray) makes it pending with per_seedling null. */
 export function costPerSeedling(ctx: Ctx, src: { seedbed_id: string; tray_id?: string | null }, asOf: string): { per_seedling: number | null; pending: boolean } {
   require(ctx, 'production.seedbed.view')

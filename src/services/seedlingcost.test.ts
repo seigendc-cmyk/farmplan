@@ -141,4 +141,14 @@ describe('seedling cost', () => {
     expect(() => units(o, '2026-13-45')).toThrow(/Invalid date/)
     expect(() => costPerSeedling(o, { seedbed_id: bay }, '2026-13-45')).toThrow(/Invalid date/)
   })
+  it('open bed with no count and cost, without finance.cost.view: pending exposed, money null', () => {
+    cost(100, '2026-10-01', { seedbed: open })
+    expect(seedbedUnitCosts(noCostView(), open)[0]).toMatchObject({ unit: 'bed', seedlings: null, cost: null, per_seedling: null, pending: true })
+    expect(costPerSeedling(noCostView(), { seedbed_id: open }, '2026-12-01')).toEqual({ per_seedling: null, pending: true })
+  })
+  it('rejects dates that do not round-trip (30 Feb, 31 Apr) and accepts a leap day', () => {
+    for (const d of ['2026-02-30', '2026-04-31']) expect(() => units(o, d)).toThrow(/Invalid date/)
+    expect(() => units(o, '2028-02-29')).not.toThrow()
+    expect(() => units(o, '2027-02-29')).toThrow(/Invalid date/)
+  })
 })
