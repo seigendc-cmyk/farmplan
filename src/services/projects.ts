@@ -28,7 +28,7 @@ const LEAVE: Record<string, Record<string, (db: Db, p: Gate) => string | null>> 
     funding: (db, p) => p.funding_not_needed || db.get(`SELECT 1 FROM funding_requests WHERE project_id=? AND deleted_at IS NULL LIMIT 1`, [p.id]) ? null : 'Raise a funding request, or mark that no funding is needed',
     contracted: (_db, p) => p.contract_id || p.independent ? null : 'Link a contract, or mark the project as independent',
     land_seedbed: (db, p) => has(db, 'seedbeds', p.season_id) ? null : 'Record at least one seedbed',
-    growing: (db, p) => has(db, 'transplants', p.season_id) ? null : 'Record transplanting',
+    growing: (db, p) => hasCropTransplant(db, p.season_id) ? null : 'Record transplanting',
     harvest_curing: (db, p) => has(db, 'harvest_batches', p.season_id) ? null : 'Record at least one harvest batch',
     grading_marketing: (db, p) => !has(db, 'sales', p.season_id) ? 'Record at least one sale' : p.season_status !== 'closed' ? 'Close the season' : null,
   },
@@ -40,6 +40,9 @@ const LEAVE: Record<string, Record<string, (db: Db, p: Gate) => string | null>> 
     dispatched: (db, p) => has(db, 'transplants', p.season_id) ? null : "Record at least one transplant from this season's seedbeds",
   },
 }
+/** A crop season's transplanting: legacy ones from its own beds, or cross-season ones planted into it from a seedbed-module season (crop_season_id). */
+const hasCropTransplant = (db: Db, seasonId: string) => !!db.get(`SELECT 1 FROM transplants WHERE COALESCE(crop_season_id, season_id)=? AND deleted_at IS NULL LIMIT 1`, [seasonId])
+/** Seedbed-module `dispatched` keeps `has(...)`: season_id is the SOURCE bed season, whatever crop season the seedlings went to. */
 const has = (db: Db, table: string, seasonId: string) => !!db.get(`SELECT 1 FROM ${table} WHERE season_id=? AND deleted_at IS NULL LIMIT 1`, [seasonId])
 
 export function unmetRequirements(db: Db, module: string, stage: string, p: Gate): string[] {
