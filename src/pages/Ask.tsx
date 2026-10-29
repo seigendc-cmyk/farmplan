@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { askBrain, askCloudOpen, loadBrainSettings, saveBrainSettings, type BrainAnswer, type BrainSettings } from '../brain/ask'
-import { availableQuestions } from '../brain/catalogue'
+import { availableQuestions, cellText } from '../brain/catalogue'
 import { DEFAULT_LOCAL, testLocal } from '../brain/engine'
 import { BI_ROW_LIMIT, DEFAULT_MODEL, clearBiSettings, loadBiSettings, saveBiSettings, type BiSettings } from '../services/bi'
 import { can } from '../services/context'
@@ -8,7 +8,6 @@ import { useToasts } from '../store/app'
 import { useCtx, useData } from '../ui/hooks'
 import { Badge, Button, Card, Denied, Input, Label, Modal, PageHeader, Select, Table, Td } from '../ui/kit'
 
-const cell = (v: unknown) => v == null ? '—' : typeof v === 'number' ? new Intl.NumberFormat('en-US', { maximumFractionDigits: 2 }).format(v) : String(v)
 const ENGINE_LABEL = { rules: 'Keyword matching', local: 'Local model', claude: 'Claude' } as const
 const PRIVACY = 'Sends your question and the names of tables and columns only, never farm records. The query Claude writes runs here, on the data your role may see.'
 type Answer = BrainAnswer & { sql?: string | null; truncated?: boolean }
@@ -59,7 +58,7 @@ export default function Ask() {
           <div className="flex items-start justify-between gap-3"><div className="font-medium">{a.question}</div><Badge tone={a.engine === 'claude' ? 'amber' : a.engine === 'local' ? 'green' : 'gray'}>{ENGINE_LABEL[a.engine]}</Badge></div>
           <p className="my-2">{a.sentence}</p>
           {a.title && a.engine !== 'claude' && <p className="text-xs text-gray-500 mb-2">Looked up: {a.title}{Object.keys(a.params).length > 0 && ` (${Object.entries(a.params).map(([k, v]) => `${k}: ${v}`).join(', ')})`} · from {a.sources.map(x => x.ref).join(', ')}</p>}
-          {a.rows.length > 0 && <Table head={a.columns.map((c, j) => ({ label: c.replace(/_/g, ' '), right: typeof a.rows[0][c] === 'number' && j > 0 }))}>{a.rows.slice(0, 50).map((r, j) => <tr key={j}>{a.columns.map((c, k) => <Td key={c} right={typeof r[c] === 'number' && k > 0}>{cell(r[c])}</Td>)}</tr>)}</Table>}
+          {a.rows.length > 0 && <Table head={a.columns.map((c, j) => ({ label: c.replace(/_/g, ' '), right: typeof a.rows[0][c] === 'number' && j > 0 }))}>{a.rows.slice(0, 50).map((r, j) => <tr key={j}>{a.columns.map((c, k) => <Td key={c} right={typeof r[c] === 'number' && k > 0}>{cellText(c, r[c])}</Td>)}</tr>)}</Table>}
           {a.engine === 'claude' && a.rows.length === 0 && a.sql && <p className="text-sm text-gray-500">The query returned no rows.</p>}
           {a.truncated && <p className="text-xs text-amber-700 mt-1">Showing the first {BI_ROW_LIMIT} rows.</p>}
           {a.sql && <><button type="button" className="text-xs text-gray-600 underline mt-2" aria-expanded={sqlShown === i} onClick={() => setSqlShown(sqlShown === i ? null : i)}>{sqlShown === i ? 'Hide' : 'Show'} the query</button>

@@ -4,6 +4,7 @@ import { SEEDBED_STATUSES, createSeedbed, listSeedbeds, nextSeedbedCode, updateS
 import { TRAY_STATUSES, createTray, deleteTray, listTrays, updateTray, type Tray } from '../services/trays'
 import { listTrayTypes } from '../services/traytypes'
 import { listSeasons } from '../services/seasons'
+import { currentModule } from '../services/modules'
 import { listOperations } from '../services/operations'
 import { useCan, useCtx, useData, useRun, fmt, today } from '../ui/hooks'
 import { Badge, Button, Card, Denied, Grid, Input, Label, Modal, NumberInput, PageHeader, Select, Stat, Table, Td } from '../ui/kit'
@@ -12,9 +13,18 @@ import { RecordOperation } from './Operations'
 type Draft = Omit<SeedbedInput, 'season_id'> & { id?: string; season_id: string }
 type TrayDraft = { id?: string; tray_type_id: string; code: string; variety: string; sown_on: string; status: string; expected_seedlings?: number; actual_seedlings?: number }
 
+/** A bay's stored status is never depleted by its trays, so the row shows what the trays are doing: "2 trays: sown" or "3 trays: 2 sown, 1 growing". Nothing is stored. */
+function baySummary(st?: string[]): string | null {
+  if (!st?.length) return null
+  const order = [...TRAY_STATUSES]; const n = (x: string) => st.filter(s => s === x).length; const kinds = order.filter(x => n(x))
+  return `${st.length} tray${st.length === 1 ? '' : 's'}: ${kinds.length === 1 ? kinds[0] : kinds.map(x => `${n(x)} ${x}`).join(', ')}`
+}
+
 export default function Seedbeds() {
   const ctx = useCtx(); const can = useCan(); const run = useRun()
-  const seasons = useData(c => listSeasons(c)) ?? []
+  const allSeasons = useData(c => listSeasons(c)) ?? []; const module = useData(c => currentModule(c)) ?? 'tobacco'
+  // In the Seedbed module only its own seasons are offered (when it has none yet, every season, as before); the Tobacco module keeps the legacy view of all seasons.
+  const own = allSeasons.filter(s => s.enterprise === module); const seasons = module === 'seedbed' && own.length ? own : allSeasons
   const active = seasons.find(s => s.status === 'active')
   const [seasonId, setSeasonId] = useState<string>('')
   const sid = seasonId || active?.id || seasons[0]?.id || ''
@@ -24,9 +34,11 @@ export default function Seedbeds() {
   const [recording, setRecording] = useState<SeedbedMetrics | null>(null)
   const ops = useData(c => diary ? listOperations(c, { targetType: 'seedbed', targetId: diary.id }) : [], [diary])
   const [bayId, setBayId] = useState<string | null>(null); const [tray, setTray] = useState<TrayDraft | null>(null)
+  const bayTrays = useData(c => Object.fromEntries((rows ?? []).filter(r => r.kind === 'float_bay').map(r => [r.id, listTrays(c, r.id).map(t => t.status)])), [rows]) ?? {}
   const trays = useData(c => bayId ? listTrays(c, bayId) : [], [bayId]) ?? []; const trayTypes = useData(c => listTrayTypes(c), []) ?? []
   if (!rows) return <Denied what="seedbeds" />
   const manage = can('production.seedbed.edit'); const showCost = can('finance.cost.view')
+  const bedCols = rows.length === 0 || rows.some(r => r.kind !== 'float_bay')   // bay-only lists drop the open-bed columns (seed lot, number of beds, area): they are empty for a bay and made the table wider than its card
   const totalSeedlings = rows.reduce((s, r) => s + (r.actual_seedlings ?? 0), 0)
 
   const statusTone = (s: string) => (['ready'].includes(s) ? 'green' : ['depleted', 'abandoned'].includes(s) ? 'gray' : 'blue') as 'green' | 'gray' | 'blue'
@@ -45,20 +57,20 @@ export default function Seedbeds() {
     <>
       <PageHeader title="Seedbeds" sub="Register, diary and seedling output per bed"
         actions={<>{seasons.length > 0 && <Select value={sid} onChange={e => setSeasonId(e.target.value)} className="w-40">{seasons.map(s => <option key={s.id} value={s.id}>{s.label}</option>)}</Select>}
-          {manage && <Button variant="primary" disabled={!sid} onClick={() => setEdit({ season_id: sid, kind: 'open_bed', bed_count: 1, status: 'prepared', prepared_on: today(), code: nextSeedbedCode(ctx, sid) })}>New seedbed</Button>}</>} />
+          {manage && <Button variant="primary" disabled={!sid} onClick={() => setEdit({ season_id: sid, kind: 'open_bed', bed_count: 1, status: 'prepared', prepared_on: today(), code: nextSeedbedCode(ctx, sid, 'open_bed') })}>New seedbed</Button>}</>} />
       {!seasons.length && <Card className="p-4 mb-4 border-amber-300 bg-amber-50 text-amber-900">Create a season first (Settings → Seasons).</Card>}
       <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 mb-4">
         <Stat label="Seedbeds" value={rows.length} /><Stat label="Seedlings produced" value={fmt.num(totalSeedlings)} />
         <Stat label="Total area" value={`${fmt.num(rows.reduce((s, r) => s + (r.area_m2 ?? 0), 0))} m²`} />
       </div>
-      <Card><Table head={['Bed', 'Variety', 'Seed lot', { label: 'Beds', right: true }, { label: 'Area m²', right: true }, 'Sown', { label: 'Expected', right: true }, { label: 'Actual', right: true }, { label: 'Achieved', right: true }, ...(showCost ? [{ label: 'Cost', right: true }, { label: '/1000', right: true }] : []), 'Status', '']} empty="No seedbeds for this season.">
+      <Card><Table head={['Bed', 'Variety', ...(bedCols ? ['Seed lot', { label: 'Beds', right: true }, { label: 'Area m²', right: true }] : []), 'Sown', { label: 'Expected', right: true }, { label: 'Actual', right: true }, { label: 'Achieved', right: true }, ...(showCost ? [{ label: 'Cost', right: true }, { label: '/1000', right: true }] : []), 'Status', '']} empty="No seedbeds for this season.">
         {rows.map(r => (
           <tr key={r.id} className="hover:bg-gray-50">
-            <Td className="font-medium">{r.code}{r.kind === 'float_bay' && <span className="ml-2 text-xs font-normal text-gray-500">Float bay</span>}</Td><Td>{r.variety ?? '—'}</Td><Td>{r.seed_lot ?? '—'}</Td><Td right>{r.kind === 'float_bay' ? '—' : r.bed_count}</Td><Td right>{fmt.num(r.area_m2, 1)}</Td>
+            <Td className="font-medium whitespace-nowrap">{r.code}{r.kind === 'float_bay' && <span className="block text-xs font-normal text-gray-500">Float bay</span>}</Td><Td>{r.variety ?? '—'}</Td>{bedCols && <><Td>{r.seed_lot ?? '—'}</Td><Td right>{r.kind === 'float_bay' ? '—' : r.bed_count}</Td><Td right>{fmt.num(r.area_m2, 1)}</Td></>}
             <Td>{fmt.date(r.sown_on)}</Td><Td right>{fmt.num(r.expected_seedlings)}</Td><Td right>{fmt.num(r.actual_seedlings)}</Td>
             <Td right>{r.achievement_pct == null ? '—' : `${r.achievement_pct}%`}</Td>
             {showCost && <><Td right>{fmt.money(r.total_cost)}</Td><Td right>{fmt.money(r.cost_per_1000_seedlings)}</Td></>}
-            <Td><Badge tone={statusTone(r.status)}>{r.status}</Badge></Td>
+            <Td className="whitespace-nowrap"><Badge tone={statusTone(r.status)}>{r.kind === 'float_bay' ? baySummary(bayTrays[r.id]) ?? r.status : r.status}</Badge></Td>
             <Td className="text-right space-x-1 whitespace-nowrap">
               <Button small variant="ghost" onClick={() => setDiary(r)}>Diary</Button>
               {r.kind === 'float_bay' && <Button small aria-label={`Trays ${r.code}`} onClick={() => setBayId(r.id)}>Trays</Button>}
@@ -70,7 +82,7 @@ export default function Seedbeds() {
         <form className="space-y-3" onSubmit={e => { e.preventDefault(); void save() }}>
           <Grid cols={3}>
             <Label text="Seedbed ID"><Input value={edit.code ?? ''} onChange={e => setEdit({ ...edit, code: e.target.value })} required /></Label>
-            {!edit.id && <Label text="Kind"><Select value={edit.kind ?? 'open_bed'} onChange={e => setEdit({ ...edit, kind: e.target.value as Draft['kind'] })}><option value="open_bed">Open bed</option><option value="float_bay">Float bay</option></Select></Label>}
+            {!edit.id && <Label text="Kind"><Select value={edit.kind ?? 'open_bed'} onChange={e => { const kind = e.target.value as Draft['kind']; const was = edit.kind ?? 'open_bed'; setEdit({ ...edit, kind, code: edit.code === nextSeedbedCode(ctx, edit.season_id, was) ? nextSeedbedCode(ctx, edit.season_id, kind ?? 'open_bed') : edit.code }) }}><option value="open_bed">Open bed</option><option value="float_bay">Float bay</option></Select></Label>}
             <Label text="Variety"><Input value={edit.variety ?? ''} onChange={e => setEdit({ ...edit, variety: e.target.value })} /></Label>
             <Label text="Location"><Input value={edit.location ?? ''} onChange={e => setEdit({ ...edit, location: e.target.value })} /></Label>
             <Label text="Seed lot"><Input value={edit.seed_lot ?? ''} onChange={e => setEdit({ ...edit, seed_lot: e.target.value })} /></Label>
@@ -92,13 +104,13 @@ export default function Seedbeds() {
           <div className="flex justify-end gap-2 pt-2"><Button type="button" onClick={() => setEdit(null)}>Cancel</Button><Button variant="primary" type="submit">Save seedbed</Button></div>
         </form></Modal>}
 
-      {bay && <Modal title={`${bay.code} — trays`} onClose={() => { setBayId(null); setTray(null) }} wide>
+      {bay && <Modal title={`${bay.code} — trays`} onClose={() => { setBayId(null); setTray(null) }} wide="xl">
         <div className="space-y-3">
           <div className="flex items-center justify-between gap-2"><div className="text-sm text-gray-700">{`Seedlings in this bay: ${fmt.num(bay.actual_seedlings)} counted, ${fmt.num(bay.expected_seedlings)} expected`}</div>
             {manage && trayTypes.length > 0 && <Button variant="primary" onClick={() => setTray({ tray_type_id: trayTypes[0].id, code: '', variety: '', sown_on: '', status: 'sown' })}>Add tray</Button>}</div>
           {manage && trayTypes.length === 0 && <div className="rounded border border-amber-300 bg-amber-50 text-amber-900 p-3 text-sm">Add a tray type first in <Link to="/tray-types" className="underline font-medium">Tray types</Link>, then trays can go in this bay.</div>}
           <Table head={['Tray', 'Type', 'Variety', 'Sown', { label: 'Expected', right: true }, { label: 'Counted', right: true }, { label: 'Available', right: true }, 'Status', '']} empty="No trays in this bay yet">
-            {trays.map(t => <tr key={t.id}><Td className="font-medium">{t.code}</Td><Td>{t.tray_type}</Td><Td>{t.variety ?? '—'}</Td><Td>{fmt.date(t.sown_on)}</Td>
+            {trays.map(t => <tr key={t.id}><Td className="font-medium whitespace-nowrap">{t.code}</Td><Td className="whitespace-nowrap">{t.tray_type}</Td><Td>{t.variety ?? '—'}</Td><Td className="whitespace-nowrap">{fmt.date(t.sown_on)}</Td>
               <Td right>{fmt.num(t.expected_seedlings)}</Td><Td right>{fmt.num(t.actual_seedlings)}</Td><Td right>{fmt.num(t.available)}</Td><Td><Badge tone={statusTone(t.status)}>{t.status}</Badge></Td>
               <Td className="text-right space-x-1 whitespace-nowrap">{manage && <><Button small aria-label={`Edit ${t.code}`} onClick={() => editTray(t)}>Edit</Button>
                 <Button small variant="danger" aria-label={`Remove ${t.code}`} onClick={() => confirm(`Remove tray ${t.code}?`) && run(() => deleteTray(ctx, t.id), 'Tray removed')}>Remove</Button></>}</Td></tr>)}</Table>

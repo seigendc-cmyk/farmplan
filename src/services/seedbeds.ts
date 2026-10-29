@@ -21,10 +21,11 @@ export interface SeedbedMetrics extends Seedbed {
 
 export type SeedbedInput = Partial<Omit<Seedbed, 'id' | 'season_id' | 'kind'>> & { season_id: string; kind?: SeedbedKind }
 
-export function nextSeedbedCode(ctx: Ctx, seasonId: string): string {
+export function nextSeedbedCode(ctx: Ctx, seasonId: string, kind: 'open_bed' | 'float_bay' = 'open_bed'): string {
   const n = ctx.db.get<{ n: number }>(`SELECT COUNT(*) n FROM seedbeds WHERE season_id=?`, [seasonId])!.n
+  const prefix = kind === 'float_bay' ? 'BAY' : 'SB'
   let k = n + 1, code = ''
-  do { code = `SB-${String(k++).padStart(3, '0')}` } while (ctx.db.get(`SELECT 1 FROM seedbeds WHERE season_id=? AND code=?`, [seasonId, code]))
+  do { code = `${prefix}-${String(k++).padStart(3, '0')}` } while (ctx.db.get(`SELECT 1 FROM seedbeds WHERE season_id=? AND code=?`, [seasonId, code]))
   return code
 }
 
@@ -45,7 +46,7 @@ export function createSeedbed(ctx: Ctx, i: SeedbedInput): string {
   const bay = kind === 'float_bay'
   const season = ctx.db.get<{ id: string }>(`SELECT id FROM seasons WHERE id=? AND farm_id=? AND deleted_at IS NULL`, [i.season_id, ctx.farmId])
   need(season, 'Select a valid season')
-  const code = i.code?.trim() || nextSeedbedCode(ctx, i.season_id)
+  const code = i.code?.trim() || nextSeedbedCode(ctx, i.season_id, kind)
   need(!ctx.db.get(`SELECT 1 FROM seedbeds WHERE season_id=? AND code=? AND deleted_at IS NULL`, [i.season_id, code]), `Seedbed ${code} already exists this season`)
   return ctx.db.tx(() => {
     const id = ctx.db.insert('seedbeds', { tenant_id: ctx.tenantId, farm_id: ctx.farmId, season_id: i.season_id, code, kind, location: i.location ?? null,

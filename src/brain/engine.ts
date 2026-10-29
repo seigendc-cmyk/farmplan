@@ -18,6 +18,8 @@ const weight = (k: string) => k.startsWith('+') ? 3 : k.includes(' ') ? 2 : 1
 export function extractParams(i: RouteInput): RawParams {
   const q = i.question; const lower = q.toLowerCase(); const p: RawParams = {}
   const sm = q.match(/\b(20\d\d)\s*[/-]\s*(\d{4}|\d{2})\b/); if (sm) { const label = `${sm[1]}/${sm[2].slice(-2)}`; if (i.seasons.includes(label)) p.season = label }
+  // Any other known season label (e.g. a seedbed season called "SB 2026") named in the question; the longest label wins, whole words only.
+  if (!p.season) { const hit = [...i.seasons].sort((a, b) => b.length - a.length).find(l => l.trim().length > 1 && new RegExp(`(^|[^a-z0-9])${esc(l.trim().toLowerCase())}($|[^a-z0-9])`).test(lower)); if (hit) p.season = hit }
   const fm = lower.match(/\bf[-\s]?0*(\d+)\b|\bfield\s+0*(\d+)\b/); if (fm) { const n = fm[1] ?? fm[2]; const hit = i.fields.find(f => f.replace(/\D/g, '').replace(/^0+/, '') === n); if (hit) p.field = hit }
   const person = i.people.filter(n => n.length > 1).find(n => new RegExp(`\\b${esc(n.toLowerCase())}\\b`).test(lower)); if (person) p.actor = person
   const dm = lower.match(/last\s+(\d{1,3})\s+days?/); if (dm) p.days = Number(dm[1]); else if (/\byesterday\b|\btoday\b/.test(lower)) p.days = 1; else if (/\bweek\b/.test(lower)) p.days = 7; else if (/\bmonth\b/.test(lower)) p.days = 30
@@ -82,7 +84,7 @@ export async function testLocal(s: LocalSettings, tr: LocalTransport = defaultLo
 export function numbersGrounded(sentence: string, rows: Record<string, unknown>[]): boolean {
   const norm = (s: string) => s.replace(/,/g, '').replace(/^0+(?=\d)/, '').replace(/(\.\d*?)0+$/, '$1').replace(/\.$/, '')
   const allowed = new Set<string>([String(rows.length)])
-  const add = (n: number) => { for (const d of [0, 1, 2]) allowed.add(norm(n.toFixed(d))); allowed.add(norm(String(n))) }
+  const add = (n: number) => { for (const d of [0, 1, 2, 3, 4]) allowed.add(norm(n.toFixed(d))); allowed.add(norm(String(n))) }
   for (const r of rows) for (const v of Object.values(r)) { if (typeof v === 'number') { add(v); add(Math.abs(v)) } else if (typeof v === 'string') for (const m of v.match(/\d+(?:\.\d+)?/g) ?? []) allowed.add(norm(m)) }
   return (sentence.match(/\d[\d,]*(?:\.\d+)?/g) ?? []).every(n => allowed.has(norm(n)))
 }

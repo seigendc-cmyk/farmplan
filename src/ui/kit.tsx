@@ -54,7 +54,7 @@ const openModals: object[] = []
  * A pop-up that behaves like a dialog for the keyboard: focus moves in when it opens (an autoFocus field wins, otherwise the first
  * field), Tab and Shift+Tab stay inside it, Escape closes it, and focus goes back to whatever opened it.
  */
-export function Modal({ title, onClose, children, wide }: { title: string; onClose: () => void; children: ReactNode; wide?: boolean }) {
+export function Modal({ title, onClose, children, wide }: { title: string; onClose: () => void; children: ReactNode; wide?: boolean | 'xl' }) {
   const box = useRef<HTMLDivElement>(null); const body = useRef<HTMLDivElement>(null)
   const close = useRef(onClose); close.current = onClose
   const opener = useRef<Element | null | undefined>(undefined); if (opener.current === undefined) opener.current = document.activeElement   // read during the first render, before any autoFocus moves it
@@ -79,7 +79,7 @@ export function Modal({ title, onClose, children, wide }: { title: string; onClo
   }, [])
   return (
     <div className="fixed inset-0 z-50 bg-black/30 flex items-start justify-center overflow-y-auto p-2 sm:p-6" onMouseDown={e => e.target === e.currentTarget && onClose()}>
-      <div ref={box} tabIndex={-1} role="dialog" aria-modal="true" aria-label={title} className={`bg-white rounded-lg shadow-xl w-full min-w-0 outline-none ${wide ? 'max-w-3xl' : 'max-w-xl'} mt-1 sm:mt-8`}>
+      <div ref={box} tabIndex={-1} role="dialog" aria-modal="true" aria-label={title} className={`bg-white rounded-lg shadow-xl w-full min-w-0 outline-none ${wide === 'xl' ? 'max-w-5xl' : wide ? 'max-w-3xl' : 'max-w-xl'} mt-1 sm:mt-8`}>
         <div className="flex items-center justify-between gap-3 px-4 sm:px-5 py-3.5 border-b border-gray-200"><h2 className="font-semibold text-gray-900 min-w-0">{title}</h2>
           <button type="button" aria-label="Close" onClick={onClose} className="text-gray-500 hover:text-gray-800 text-2xl leading-none w-9 h-9 -mr-2 shrink-0 rounded">×</button></div>
         <div ref={body} className="p-4 sm:p-5">{children}</div>

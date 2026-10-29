@@ -21,6 +21,8 @@ export type Rows = Record<string, unknown>[]
 export interface Source { kind: 'view' | 'activity'; ref: string }
 export interface Question {
   id: string; title: string; about: string; keywords: string[]; params: Param[]; perms: string[]
+  /** Module whose seasons this lookup reads: with no season named it defaults to that module's active season, and a named label is resolved there first. */
+  module?: string
   run: (ctx: Ctx, p: Resolved) => Rows; sources: Source[]
 }
 export type Resolved = Record<string, string | number | undefined>
@@ -28,14 +30,17 @@ export type RawParams = Record<string, unknown>
 
 const seasonOf = (p: Resolved) => String(p.season)
 /** The resolved season label back to its id, for lookups that read through a service. */
-const seasonIdOf = (c: Ctx, p: Resolved) => c.db.get<{ id: string }>(`SELECT id FROM seasons WHERE farm_id=? AND label=? AND deleted_at IS NULL`, [c.farmId, seasonOf(p)])?.id
+const seasonIdOf = (c: Ctx, p: Resolved, module?: string) => c.db.get<{ id: string }>(`SELECT id FROM seasons WHERE farm_id=? AND label=? AND deleted_at IS NULL ORDER BY (enterprise=?) DESC, starts_on DESC`, [c.farmId, seasonOf(p), module ?? ''])?.id
 /** One row per cost unit (tray of a float bay, or a whole open bed) of every seedbed in the season. Money and per_seedling come only from seedbedUnitCosts. */
-const unitRows = (c: Ctx, p: Resolved) => listSeedbeds(c, seasonIdOf(c, p)).flatMap(b => seedbedUnitCosts(c, b.id).map(u => ({ seedbed: b.code, unit: u.unit === 'bed' ? 'whole bed' : u.code, u })))
+const unitRows = (c: Ctx, p: Resolved) => listSeedbeds(c, seasonIdOf(c, p, 'seedbed')).flatMap(b => seedbedUnitCosts(c, b.id).map(u => ({ seedbed: b.code, unit: u.unit === 'bed' ? 'whole bed' : u.code, u })))
 const todayIso = () => new Date().toISOString().slice(0, 10)
 const byView = (view: string, perms: string[]) => ({ sources: [{ kind: 'view', ref: view } as Source], perms })
 
 /** Season labels are needed to answer anything, so the brain reads them directly instead of requiring the season-management permission; no other season data is exposed. */
 export const seasonLabels = (ctx: Ctx) => ctx.db.all<{ label: string; status: string }>(`SELECT label, status FROM seasons WHERE farm_id=? AND deleted_at IS NULL ORDER BY starts_on DESC`, [ctx.farmId])
+
+/** The module's own active season (one per module), or failing that nothing: callers then fall back to the farm-wide default. */
+const moduleDefaultSeason = (ctx: Ctx, module: string) => ctx.db.get<{ label: string; status: string }>(`SELECT label, status FROM seasons WHERE farm_id=? AND enterprise=? AND status='active' AND deleted_at IS NULL ORDER BY starts_on DESC LIMIT 1`, [ctx.farmId, module])
 
 export const CATALOGUE: Question[] = [
   { id: 'harvest_by_field', title: 'Green leaf harvested per field', about: 'Total green weight (kg) harvested from each field in a season, highest first', keywords: ['harvest', 'harvested', 'green', 'yield', 'reaped', 'picked', 'most tobacco', 'gave us the most'],
@@ -105,15 +110,15 @@ export const CATALOGUE: Question[] = [
     run: (c, p) => listSeedbeds(c, seasonIdOf(c, p)).map(s => ({ seedbed: s.code, variety: s.variety, sown: s.sown_on, expected: s.expected_seedlings, actual: s.actual_seedlings, achieved_pct: s.achievement_pct, available: s.available_seedlings, status: s.status })) },
   // Seedbed cost and tray lookups. Same services as the Seedbeds, Trays and Operations pages; the two cost lookups also need finance.cost.view. Pending prints the word "pending", never a number.
   { id: 'seedbed_cost', title: 'Seedbed cost', about: 'What each seedbed has cost in a season: for a float bay one row per tray (bay-level cost shared by seedlings), for an open bed one row, with the seedling count and the cost', keywords: ['+seedbed cost', '+seedbeds cost', '+cost of the seedbeds', '+cost of seedbeds', '+cost of the seedbed', '+bay cost', '+spent on the seedbeds', '+spent on seedbeds', '+spent on the nursery', '+nursery cost', '+seedbed spend'],
-    params: [{ name: 'season', type: 'season', optional: true, about: 'Season label; defaults to the active season' }], sources: [{ kind: 'view', ref: 'seedbed costs' }], perms: ['finance.cost.view', 'production.seedbed.view'],
+    module: 'seedbed', params: [{ name: 'season', type: 'season', optional: true, about: 'Season label; defaults to the active season' }], sources: [{ kind: 'view', ref: 'seedbed costs' }], perms: ['finance.cost.view', 'production.seedbed.view'],
     run: (c, p) => unitRows(c, p).map(({ seedbed, unit, u }) => ({ seedbed, unit, seedlings: u.seedlings, cost: u.cost })) },
   { id: 'cost_per_seedling', title: 'Cost per seedling', about: 'Cost of one seedling for each tray of a float bay or each open bed in a season, or pending when there is cost but no seedling count yet', keywords: ['+cost per seedling', '+per seedling', '+seedling cost', '+cost of a seedling', '+cost of one seedling', '+each seedling cost', '+cost each seedling'],
-    params: [{ name: 'season', type: 'season', optional: true, about: 'Season label; defaults to the active season' }], sources: [{ kind: 'view', ref: 'seedbed costs' }], perms: ['finance.cost.view', 'production.seedbed.view'],
+    module: 'seedbed', params: [{ name: 'season', type: 'season', optional: true, about: 'Season label; defaults to the active season' }], sources: [{ kind: 'view', ref: 'seedbed costs' }], perms: ['finance.cost.view', 'production.seedbed.view'],
     run: (c, p) => unitRows(c, p).map(({ seedbed, unit, u }) => ({ seedbed, unit, per_seedling: u.pending ? 'pending' : u.per_seedling })) },
   { id: 'tray_survival', title: 'Tray germination and survival', about: 'For each float bay tray in a season: sowing date, expected and counted seedlings, germination (counted over expected), seedlings transplanted, how many of those died at transplanting, the share established, and for depleted or abandoned trays the share of counted seedlings never transplanted', keywords: ['+tray', '+trays', '+survival', '+survived', '+mortality', '+died', '+dead'],
-    params: [{ name: 'season', type: 'season', optional: true, about: 'Season label; defaults to the active season' }], sources: [{ kind: 'view', ref: 'seedbed trays' }], perms: ['production.seedbed.view'],
+    module: 'seedbed', params: [{ name: 'season', type: 'season', optional: true, about: 'Season label; defaults to the active season' }], sources: [{ kind: 'view', ref: 'seedbed trays' }], perms: ['production.seedbed.view'],
     run: (c, p) => { const pct = (n: number, d: number | null) => d ? Math.round(n / d * 1000) / 10 : null
-      return listSeedbeds(c, seasonIdOf(c, p)).filter(b => b.kind === 'float_bay').flatMap(b => listTrays(c, b.id).map(t => {
+      return listSeedbeds(c, seasonIdOf(c, p, 'seedbed')).filter(b => b.kind === 'float_bay').flatMap(b => listTrays(c, b.id).map(t => {
         // transplants.mortality is part of qty (established = qty - mortality), summed over this tray's live transplants only.
         const died = c.db.get<{ n: number }>(`SELECT COALESCE(SUM(mortality),0) n FROM transplants WHERE farm_id=? AND tray_id=? AND deleted_at IS NULL`, [c.farmId, t.id])!.n
         const closed = t.status === 'depleted' || t.status === 'abandoned'
@@ -123,8 +128,8 @@ export const CATALOGUE: Question[] = [
           unplanted_pct: closed && t.actual_seedlings ? pct(Math.max(0, t.actual_seedlings - t.transplanted), t.actual_seedlings) : null }
       })) } },
   { id: 'bay_operations', title: 'Float bay operations', about: 'Work done in the float bay (filling, seeding, water top-ups, clipping, hardening, cleaning) with date, type and tray; latest first, optionally only the last few days. No prices.', keywords: ['+float bay', '+float water', '+float bays', 'in the bay', 'tray filling', 'top up', 'topped up'],
-    params: [{ name: 'season', type: 'season', optional: true, about: 'Season label; defaults to the active season' }, { name: 'days', type: 'number', optional: true, about: 'How many days back; default the whole season' }], sources: [{ kind: 'view', ref: 'operations' }], perms: ['production.operation.view', 'production.seedbed.view'],
-    run: (c, p) => { const sid = seasonIdOf(c, p); const from = p.days ? new Date(Date.now() - Number(p.days) * 864e5).toISOString().slice(0, 10) : ''
+    module: 'seedbed', params: [{ name: 'season', type: 'season', optional: true, about: 'Season label; defaults to the active season' }, { name: 'days', type: 'number', optional: true, about: 'How many days back; default the whole season' }], sources: [{ kind: 'view', ref: 'operations' }], perms: ['production.operation.view', 'production.seedbed.view'],
+    run: (c, p) => { const sid = seasonIdOf(c, p, 'seedbed'); const from = p.days ? new Date(Date.now() - Number(p.days) * 864e5).toISOString().slice(0, 10) : ''
       return listSeedbeds(c, sid).filter(b => b.kind === 'float_bay').flatMap(b => listOperations(c, { seasonId: sid, targetType: 'seedbed', targetId: b.id, limit: 1000 })).filter(r => r.occurred_on >= from)
         .sort((a, b) => b.occurred_on.localeCompare(a.occurred_on)).slice(0, 30).map(r => ({ date: r.occurred_on, type: r.op_type, tray: r.tray_code ?? 'whole bay' })) } },
   { id: 'storage_ready', title: 'Storage ready to open', about: 'Slate packs and piles still maturing: which are ready to open for grading and how many days the rest need', keywords: ['storage', 'stored', 'starking', 'slate', 'slates', 'pile', 'piles', 'maturing', 'matured', 'ready to open', 'open for grading', 'ready for grading'],
@@ -156,7 +161,7 @@ export function resolveParams(ctx: Ctx, q: Question, raw: RawParams = {}): Resol
   for (const d of q.params) {
     let v = raw[d.name]; if (typeof v === 'string') v = v.trim()
     if (v == null || v === '') {
-      if (d.type === 'season') { const all = seasonLabels(ctx); const s = all.find(x => x.status === 'active') ?? all[0]; need(s, 'There is no season yet'); out[d.name] = s.label; continue }
+      if (d.type === 'season') { const all = seasonLabels(ctx); const s = (q.module ? moduleDefaultSeason(ctx, q.module) : undefined) ?? all.find(x => x.status === 'active') ?? all[0]; need(s, 'There is no season yet'); out[d.name] = s.label; continue }
       need(d.optional, `Missing: ${d.about}`); continue
     }
     switch (d.type) {
@@ -173,12 +178,19 @@ export function resolveParams(ctx: Ctx, q: Question, raw: RawParams = {}): Resol
 /** People the log knows about, so a router can recognise "what did Tendai do". Respects the caller's access. */
 export const knownPeople = (ctx: Ctx) => { try { return activityActors(ctx) } catch { return [] } }
 
+/** How a result cell is shown. Money and counts keep 2 decimals; cost per seedling is a small number (cents per thousand seedlings) so it keeps 4. Words such as "pending" pass through. */
+export function cellText(col: string, v: unknown): string {
+  if (v == null) return '—'
+  if (typeof v !== 'number') return String(v)
+  return new Intl.NumberFormat('en-US', col === 'per_seedling' ? { minimumFractionDigits: 4, maximumFractionDigits: 4 } : { maximumFractionDigits: 2 }).format(v)
+}
+
 /** Plain one-or-two-sentence description built by code, used when no model phrases the answer. */
 export function templateSentence(title: string, rows: Rows): string {
   if (!rows.length) return `${title}: nothing found.`
   const cols = Object.keys(rows[0]); const label = cols[0]; const num = cols.find(c => typeof rows[0][c] === 'number')
-  const f = (v: unknown) => typeof v === 'number' ? new Intl.NumberFormat('en-US', { maximumFractionDigits: 2 }).format(v) : String(v ?? '—')
-  if (rows.length === 1) return `${title}: ${cols.map(c => `${c.replace(/_/g, ' ')} ${f(rows[0][c])}`).join(', ')}.`
-  const top = num ? `${f(rows[0][label])} leads with ${f(rows[0][num])} ${num.replace(/_/g, ' ')}` : `latest: ${f(rows[0][label])}`
+  const f = (c: string, v: unknown) => cellText(c, v)
+  if (rows.length === 1) return `${title}: ${cols.map(c => `${c.replace(/_/g, ' ')} ${f(c, rows[0][c])}`).join(', ')}.`
+  const top = num ? `${f(label, rows[0][label])} leads with ${f(num, rows[0][num])} ${num.replace(/_/g, ' ')}` : `latest: ${f(label, rows[0][label])}`
   return `${title}: ${rows.length} rows; ${top}.`
 }
