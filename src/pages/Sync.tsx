@@ -1,5 +1,6 @@
 import { useRef, useState } from 'react'
 import { createClient } from '@supabase/supabase-js'
+import { loadCloudConfig, saveCloudConfig } from '../lib/cloud'
 import { Db, IndexedDbPersistence, MemoryPersistence } from '../db/database'
 import { dismissSyncConflict, listSyncConflicts, retrySyncConflict, supabaseCloud, syncNow } from '../services/sync'
 import { useCtx, useData, useRun, fmt, plural } from '../ui/hooks'
@@ -7,12 +8,10 @@ import { useApp, useToasts } from '../store/app'
 import { Button, Card, Grid, Table, Td, Input, Label, PageHeader } from '../ui/kit'
 import { can } from '../services/context'
 
-const CFG = 'farmplan.cloud'
-const load = () => { try { return JSON.parse(localStorage.getItem(CFG) ?? '{}') as { url?: string; key?: string; email?: string } } catch { return {} } }
 
 export default function SyncPage() {
   const ctx = useCtx(); const run = useRun(); const push = useToasts(s => s.push); const bump = useApp(s => s.bump)
-  const [cfg, setCfg] = useState(load()); const [pw, setPw] = useState(''); const [busy, setBusy] = useState(false); const [report, setReport] = useState('')
+  const [cfg, setCfg] = useState(loadCloudConfig()); const [pw, setPw] = useState(''); const [busy, setBusy] = useState(false); const [report, setReport] = useState('')
   const file = useRef<HTMLInputElement>(null)
   const last = ctx.db.get<{ value: string }>(`SELECT value FROM meta WHERE key='last_sync'`)?.value
   const owner = can(ctx, 'settings.farm.manage')
@@ -22,7 +21,7 @@ export default function SyncPage() {
     setBusy(true); setReport('')
     try {
       if (!cfg.url || !cfg.key || !cfg.email) throw new Error('Enter the Supabase URL, publishable key and your account email.')
-      localStorage.setItem(CFG, JSON.stringify(cfg))
+      saveCloudConfig(cfg)
       const sb = createClient(cfg.url, cfg.key)
       const { error } = await sb.auth.signInWithPassword({ email: cfg.email, password: pw })
       if (error) throw new Error(`Cloud sign-in failed: ${error.message}`)

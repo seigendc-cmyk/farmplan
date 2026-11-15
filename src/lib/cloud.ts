@@ -2,7 +2,25 @@ import { createClient, type SupabaseClient } from '@supabase/supabase-js'
 
 export interface CloudConfig { url?: string; key?: string; email?: string }
 const KEY = 'farmplan.cloud'
-export const loadCloudConfig = (): CloudConfig => { try { return JSON.parse(localStorage.getItem(KEY) ?? '{}') as CloudConfig } catch { return {} } }
+const buildConfig: CloudConfig = {
+  url: import.meta.env.VITE_SUPABASE_URL?.trim(),
+  key: import.meta.env.VITE_SUPABASE_ANON_KEY?.trim(),
+}
+
+export const loadCloudConfig = (): CloudConfig => {
+  let saved: CloudConfig = {}
+  try {
+    saved = JSON.parse(localStorage.getItem(KEY) ?? '{}') as CloudConfig
+  } catch {
+    saved = {}
+  }
+
+  return {
+    url: saved.url || buildConfig.url,
+    key: saved.key || buildConfig.key,
+    email: saved.email,
+  }
+}
 export const saveCloudConfig = (c: CloudConfig) => { try { localStorage.setItem(KEY, JSON.stringify(c)) } catch { /* private mode */ } }
 
 type Factory = (cfg: CloudConfig) => SupabaseClient
