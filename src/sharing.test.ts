@@ -23,7 +23,7 @@ describe('sharing service', () => {
   it('invite → accept → portal → revoke through the cloud API', async () => {
     const cloud = makeFakeCloud({ portal_fields: [{ id: 'f1', tenant_id: 'T1', field_no: 'F-01' }, { id: 'f2', tenant_id: 'OTHER', field_no: 'X' }] })
     const farmer = cloud.client('farmer@x.co'), con = cloud.client('con@x.co')
-    const { code, id } = await createInvitation(farmer, 'T1', { email: 'con@x.co', purpose: 'contractor', permissions: ['production.field.view'], access_days: 30 })
+    const { code, id } = await createInvitation(farmer, 'T1', { email: 'con@x.co', purpose: 'contractor', permissions: ['production.field.view'], access_days: 30, farm_id: null, season_id: null })
     expect(code.startsWith(id + '.')).toBe(true); expect(parseInviteCode(code).id).toBe(id)
     expect(() => parseInviteCode('nonsense')).toThrow(/invitation code/)
     await expect(acceptInvitation(cloud.client('other@x.co'), code)).rejects.toThrow(/different email/)
@@ -35,7 +35,7 @@ describe('sharing service', () => {
     expect(await myAccess(con)).toHaveLength(0)
   })
   it('classifies invitation state', () => {
-    const base = { id: 'i', invitee_email: 'a@b.co', purpose: 'contractor' as const, permissions: [], expires_at: '2099-01-01', accepted_at: null, revoked_at: null, access_days: null, created_at: '' }
+    const base = { id: 'i', invitee_email: 'a@b.co', purpose: 'contractor' as const, permissions: [], farm_id: null, season_id: null, expires_at: '2099-01-01', accepted_at: null, revoked_at: null, access_days: null, created_at: '' }
     expect(invitationState(base)).toBe('pending')
     expect(invitationState({ ...base, expires_at: '2000-01-01' })).toBe('expired')
     expect(invitationState({ ...base, accepted_at: 'x' })).toBe('accepted')

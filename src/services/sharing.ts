@@ -23,24 +23,73 @@ export function validateShare(email: string, permissions: string[]): string | nu
 }
 
 // ------------------------------------------------------------------ farmer side
-export interface Invitation { id: string; invitee_email: string; purpose: SharePurpose; permissions: string[]; expires_at: string; accepted_at: string | null; revoked_at: string | null; access_days: number | null; created_at: string }
-export interface Grant { id: string; purpose: SharePurpose; permissions: string[]; expires_at: string | null; revoked_at: string | null; invitation_id: string | null; created_at: string }
+export interface Invitation { id: string; invitee_email: string; purpose: SharePurpose; permissions: string[]; farm_id: string | null; season_id: string | null; expires_at: string; accepted_at: string | null; revoked_at: string | null; access_days: number | null; created_at: string }
+export interface Grant { id: string; purpose: SharePurpose; permissions: string[]; farm_id: string | null; season_id: string | null; expires_at: string | null; revoked_at: string | null; invitation_id: string | null; created_at: string }
 
 const unwrap = <T>(r: { data: T | null; error: { message: string } | null }, what: string): T => { if (r.error) throw new Error(`${what}: ${r.error.message}`); return (r.data ?? ([] as unknown)) as T }
 
 /** The code is `<invitation id>.<secret token>`. The secret is shown once; only its hash is stored in the cloud. */
-export async function createInvitation(sb: SupabaseClient, tenantId: string, i: { email: string; purpose: SharePurpose; permissions: string[]; access_days?: number | null }): Promise<{ id: string; code: string }> {
-  const err = validateShare(i.email, i.permissions); if (err) throw new Error(err)
-  const rows = unwrap(await sb.rpc('create_invitation', { p_tenant: tenantId, p_email: i.email.trim(), p_purpose: i.purpose, p_permissions: i.permissions, p_access_days: i.access_days ?? null }), 'Invitation') as { invitation_id: string; token: string }[]
-  const r = Array.isArray(rows) ? rows[0] : (rows as unknown as { invitation_id: string; token: string })
+export async function createInvitation(
+  sb: SupabaseClient,
+  tenantId: string,
+  i: {
+    email: string
+    purpose: SharePurpose
+    permissions: string[]
+    access_days?: number | null
+    farm_id: string | null
+    season_id: string | null
+  }
+): Promise<{ id: string; code: string }> {
+  const err = validateShare(i.email, i.permissions)
+  if (err) throw new Error(err)
+
+  if (i.season_id && !i.farm_id) {
+    throw new Error('A season-specific invitation must belong to a farm')
+  }
+
+  const rows = unwrap(
+    await sb.rpc('create_invitation', {
+      p_tenant: tenantId,
+      p_email: i.email.trim(),
+      p_purpose: i.purpose,
+      p_permissions: i.permissions,
+      p_access_days: i.access_days ?? null,
+      p_farm: i.farm_id,
+      p_season: i.season_id,
+    }),
+    'Invitation'
+  ) as { invitation_id: string; token: string }[]
+
+  const r = Array.isArray(rows)
+    ? rows[0]
+    : rows as unknown as { invitation_id: string; token: string }
+
   if (!r?.invitation_id) throw new Error('Invitation was not created')
-  return { id: r.invitation_id, code: `${r.invitation_id}.${r.token}` }
+
+  return {
+    id: r.invitation_id,
+    code: `${r.invitation_id}.${r.token}`,
+  }
 }
 export async function listInvitations(sb: SupabaseClient, tenantId: string): Promise<Invitation[]> {
-  return unwrap(await sb.from('access_invitations').select('id,invitee_email,purpose,permissions,expires_at,accepted_at,revoked_at,access_days,created_at').eq('tenant_id', tenantId).order('created_at', { ascending: false }), 'Invitations') as Invitation[]
+  return unwrap(
+    await sb.from('access_invitations')
+      .select('id,invitee_email,purpose,permissions,farm_id,season_id,expires_at,accepted_at,revoked_at,access_days,created_at')
+      .eq('tenant_id', tenantId)
+      .order('created_at', { ascending: false }),
+    'Invitations'
+  ) as Invitation[]
 }
+
 export async function listGrants(sb: SupabaseClient, tenantId: string): Promise<Grant[]> {
-  return unwrap(await sb.from('access_grants').select('id,purpose,permissions,expires_at,revoked_at,invitation_id,created_at').eq('tenant_id', tenantId).order('created_at', { ascending: false }), 'Access') as Grant[]
+  return unwrap(
+    await sb.from('access_grants')
+      .select('id,purpose,permissions,farm_id,season_id,expires_at,revoked_at,invitation_id,created_at')
+      .eq('tenant_id', tenantId)
+      .order('created_at', { ascending: false }),
+    'Access'
+  ) as Grant[]
 }
 export async function revokeGrant(sb: SupabaseClient, grantId: string) { unwrap(await sb.rpc('revoke_access', { p_grant: grantId }), 'Revoke') }
 export async function revokeInvitation(sb: SupabaseClient, id: string) { unwrap(await sb.from('access_invitations').update({ revoked_at: new Date().toISOString() }).eq('id', id), 'Revoke') }
@@ -51,7 +100,7 @@ export function invitationState(i: Invitation, now = new Date()): 'accepted' | '
 }
 
 // ------------------------------------------------------------------ invitee / portal side
-export interface Access { grant_id: string; tenant_id: string; tenant_name: string; farm_id: string | null; farm_name: string | null; purpose: SharePurpose; permissions: string[]; expires_at: string | null }
+export interface Access { grant_id: string; tenant_id: string; tenant_name: string; farm_id: string | null; farm_name: string | null; purpose: SharePurpose; permissions: string[]; expires_at: string | null; season_id: string | null; }
 export async function myAccess(sb: SupabaseClient): Promise<Access[]> { return unwrap(await sb.rpc('my_access'), 'Access') as Access[] }
 export function parseInviteCode(code: string): { id: string; token: string } {
   const m = /^\s*([0-9a-fA-F-]{36})\.([0-9a-fA-F]{20,})\s*$/.exec(code); if (!m) throw new Error('That does not look like an invitation code'); return { id: m[1], token: m[2] }

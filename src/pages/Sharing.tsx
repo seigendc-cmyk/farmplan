@@ -37,7 +37,15 @@ export default function Sharing() {
   const ctx = useCtx(); const run = useRun()
   const sb = useCloudSession(s => s.sb); const setSession = useCloudSession(s => s.set)
   const [inv, setInv] = useState<Invitation[]>([]); const [grants, setGrants] = useState<Grant[]>([])
-  const [draft, setDraft] = useState<{ email: string; purpose: SharePurpose; perms: Set<string>; days?: number } | null>(null)
+  const [draft, setDraft] = useState<{
+    email: string
+    purpose: SharePurpose
+    perms: Set<string>
+    days?: number
+    scope: 'tenant' | 'farm' | 'season'
+    seasonId: string
+  } | null>(null)
+  const [seasons, setSeasons] = useState<{ id: string; label: string }[]>([])
   const [code, setCode] = useState<{ email: string; code: string } | null>(null)
 
   const reload = useCallback(async (c: SupabaseClient | null = sb) => {
@@ -46,16 +54,50 @@ export default function Sharing() {
   }, [sb, ctx.tenantId])
   useEffect(() => { void reload() }, [reload])
 
+  useEffect(() => {
+    try {
+      const rows = ctx.db.all<{ id: string; label: string }>(
+        "SELECT id, label FROM seasons WHERE farm_id=? AND deleted_at IS NULL ORDER BY starts_on DESC",
+        [ctx.farmId]
+      )
+      setSeasons(rows)
+    } catch {
+      setSeasons([])
+    }
+  }, [ctx.db, ctx.farmId])
+
   if (!can(ctx, 'settings.access.manage')) return <Denied what="sharing with contractors and extension officers" />
   if (!sb) return <CloudSignIn intro="Sharing runs through the cloud. Sign in with the cloud account that owns this farm (you must be online and have synced at least once)." onConnected={(c, e) => { setSession(c, e); void reload(c) }} />
 
   const preset = (p: SharePurpose) => setDraft(d => d && { ...d, purpose: p, perms: new Set(p === 'other' ? [] : SHARE_PRESETS[p]) })
   const toggle = (k: string) => setDraft(d => { if (!d) return d; const n = new Set(d.perms); n.has(k) ? n.delete(k) : n.add(k); return { ...d, perms: n } })
   async function send() {
-    const d = draft!; const err = validateShare(d.email, [...d.perms])
+    const d = draft!
     let made: { code: string } | null = null
-    if (await run(async () => { if (err) throw new Error(err); made = await createInvitation(sb!, ctx.tenantId, { email: d.email, purpose: d.purpose, permissions: [...d.perms], access_days: d.days ?? null }) }, 'Invitation created') && made) {
-      setCode({ email: d.email, code: (made as { code: string }).code }); setDraft(null); void reload()
+
+    if (await run(async () => {
+      if (d.scope !== 'tenant' && !ctx.farmId) {
+        throw new Error('Select a current farm before creating this invitation')
+      }
+      if (d.scope === 'season' && !d.seasonId) {
+        throw new Error('Choose a season for season-specific access')
+      }
+
+      const err = validateShare(d.email, [...d.perms])
+      if (err) throw new Error(err)
+
+      made = await createInvitation(sb!, ctx.tenantId, {
+        email: d.email,
+        purpose: d.purpose,
+        permissions: [...d.perms],
+        access_days: d.days ?? null,
+        farm_id: d.scope === 'tenant' ? null : ctx.farmId,
+        season_id: d.scope === 'season' ? d.seasonId : null
+      })
+    }, 'Invitation created') && made) {
+      setCode({ email: d.email, code: (made as { code: string }).code })
+      setDraft(null)
+      void reload()
     }
   }
   const active = grants.filter(g => !g.revoked_at)
@@ -63,7 +105,7 @@ export default function Sharing() {
     <>
       <div className="flex items-center justify-between mb-3">
         <p className="text-gray-600 max-w-2xl">Invite a contractor or extension officer and choose exactly what they can see. Access is view-only, tied to their email, and you can withdraw it at any time. Costs, sales and contract terms are never shared unless you tick them.</p>
-        <Button variant="primary" onClick={() => setDraft({ email: '', purpose: 'contractor', perms: new Set(SHARE_PRESETS.contractor) })}>Invite someone</Button>
+        <Button variant="primary" onClick={() => setDraft({ email: '', purpose: 'contractor', perms: new Set(SHARE_PRESETS.contractor), scope: 'farm', seasonId: '' })}>Invite someone</Button>
       </div>
 
       <h3 className="font-medium mb-1">People with access</h3>
@@ -88,7 +130,42 @@ export default function Sharing() {
               <option value="contractor">Contractor (company field staff)</option><option value="extension">Extension officer</option><option value="other">Other</option></Select></Label>
           </Grid>
           <div>
-            <div className="text-xs font-medium text-gray-600 mb-1">What can they see?</div>
+            <div className="space-y-2">
+            <Label text="Access scope">
+              <Select
+                value={draft.scope}
+                onChange={e => setDraft({
+                  ...draft,
+                  scope: e.target.value as 'tenant' | 'farm' | 'season',
+                  seasonId: ''
+                })}
+              >
+                <option value="tenant">Entire business — all farms and seasons</option>
+                <option value="farm">Current farm — all its seasons</option>
+                <option value="season">Specific season — current farm only</option>
+              </Select>
+            </Label>
+
+            {draft.scope === 'season' && (
+              <Label text="Select season">
+                <Select
+                  value={draft.seasonId}
+                  onChange={e => setDraft({ ...draft, seasonId: e.target.value })}
+                >
+                  <option value="">Choose a season</option>
+                  {seasons.map(s => (
+                    <option key={s.id} value={s.id}>{s.label}</option>
+                  ))}
+                </Select>
+                {seasons.length === 0 && (
+                  <span className="text-xs text-amber-700">
+                    No seasons are available for this farm.
+                  </span>
+                )}
+              </Label>
+            )}
+          </div>
+          <div className="text-xs font-medium text-gray-600 mb-1">What can they see?</div>
             <div className="grid sm:grid-cols-2 gap-x-6">{SHARE_MENUS.map(m => (
               <label key={m.key} className="flex items-center gap-2 py-0.5"><input type="checkbox" checked={draft.perms.has(m.key)} onChange={() => toggle(m.key)} />{m.label}{m.sensitive && <Badge tone="amber">sensitive</Badge>}</label>))}</div>
           </div>
@@ -99,8 +176,11 @@ export default function Sharing() {
       {code && <Modal title="Invitation created" onClose={() => setCode(null)}>
         <p className="mb-2">Send this code to <b>{code.email}</b> by WhatsApp or email. <b>It is shown only once</b> and works only for that email address.</p>
         <textarea readOnly aria-label="Invitation code" className="w-full border border-gray-300 rounded-md p-2 font-mono text-xs bg-gray-50" rows={3} value={code.code} onFocus={e => e.currentTarget.select()} />
-        <p className="text-gray-500 text-xs mt-2">They open farmPLAN → “Contractor / extension portal”, sign in with the same email, and paste the code.</p>
-        <div className="flex justify-end gap-2 mt-3"><Button onClick={() => { void navigator.clipboard?.writeText(code.code) }}>Copy</Button><Button variant="primary" onClick={() => setCode(null)}>Done</Button></div></Modal>}
+        <p className="text-gray-500 text-xs mt-2">They open farmPLAN, select Contractor / extension portal, and enter this code.</p>
+        <div className="flex justify-end mt-4">
+          <Button variant="primary" onClick={() => setCode(null)}>Done</Button>
+        </div>
+      </Modal>}
     </>
   )
 }

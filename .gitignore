@@ -3,3 +3,12 @@ dist
 src-tauri/target
 *.log
 lint-report/
+
+# Local development backups and review artifacts
+*.bak
+*.bak*
+*.backup*
+*.before-*
+*.scope-backup
+review-diffs.txt
+migration-security-inventory.txt
